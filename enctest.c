@@ -26,13 +26,7 @@ static unsigned char PrivateKey[chunkLength];
 static unsigned char E[chunkLength];
 static unsigned char F[chunkLength];
 
-#define LITTLE_ENDIAN
-
-#ifdef LITTLE_ENDIAN
 #define BIT(C, i, m) ((C)[(i)/8] & (1 << (7 - ((i) & 7))))
-#else
-#define BIT(C, i, m) ((C)[(i)/8] & (1 << ((i) & 7)))
-#endif
 
 void WriteOperand(FILE * fp, unsigned char *A, int m)
 {
@@ -59,11 +53,7 @@ static void Clear(unsigned char *A, int m)
 static void One(unsigned char *A, int m)
 {
     Clear(A, m);
-#ifdef LITTLE_ENDIAN
     A[m - 1] = 1;
-#else
-    A[0] = 1;
-#endif
 }
 
 /* A = B */
@@ -81,14 +71,11 @@ static void Double(unsigned char *B, int m)
     int i, x;
 
     x = 0;
-#ifdef LITTLE_ENDIAN
-    for (i = m - 1; i >= 0; i--) {
-#else
-    for (i = 0; i < m; i++) {
-#endif
-	x += 2 * B[i];
-	B[i] = (unsigned char) (x & 0xFF);
-	x >>= 8;
+    for (i = m - 1; i >= 0; i--) 
+    {
+	    x += 2 * B[i];
+	    B[i] = (unsigned char) (x & 0xFF);
+	    x >>= 8;
     }
     /* shouldn't carry */
 }
@@ -100,14 +87,11 @@ static int Adjust(unsigned char *B, unsigned char *PublicKey, int m)
     unsigned char T[chunkLength];
 
     x = 0;
-#ifdef LITTLE_ENDIAN
-    for (i = m - 1; i >= 0; i--) {
-#else
-    for (i = 0; i < m; i++) {
-#endif
-	x += B[i] - PublicKey[i];
-	T[i] = (unsigned char) (x & 0xFF);
-	x >>= 8;
+    for (i = m - 1; i >= 0; i--) 
+    {
+	    x += B[i] - PublicKey[i];
+	    T[i] = (unsigned char) (x & 0xFF);
+	    x >>= 8;
     }
 
     if (x >= 0) {
@@ -121,11 +105,7 @@ static int Adjust(unsigned char *B, unsigned char *PublicKey, int m)
 static void MontCoeff(unsigned char *v, unsigned char *PublicKey, int m)
 {
     int i;
-#ifdef LITTLE_ENDIAN
     int lsb = m - 1;
-#else
-    int lsb = 0;
-#endif
 
     *v = 0;
     for (i = 0; i < 8; i++)
@@ -157,42 +137,22 @@ static void MontMult(unsigned char *A, unsigned char *B, unsigned char *C,
 
     Clear(T, 2 * m);
 
-#ifdef LITTLE_ENDIAN
     for (i = m - 1; i >= 0; i--) {
-#else
-    for (i = 0; i < m; i++) {
-#endif
 	x = 0;
-#ifdef LITTLE_ENDIAN
 	for (j = m - 1; j >= 0; j--) {
-#else
-	for (j = 0; j < m; j++) {
-#endif
 	    x += (unsigned int) T[i + j] +
 		(unsigned int) B[i] * (unsigned int) C[j];
 	    T[i + j] = (unsigned char) (x & 0xFF);
 	    x >>= 8;
 	}
-#ifdef LITTLE_ENDIAN
 	T[i] = (unsigned char) (x & 0xFF);
-#else
-	T[i + m] = (unsigned char) (x & 0xFF);
-#endif
     }
 
-#ifdef LITTLE_ENDIAN
     for (i = m - 1; i >= 0; i--) {
 	x = 0;
 	ei = (unsigned char) (((unsigned int) v * (unsigned int) T[m + i]) &
 			      0xFF);
 	for (j = m - 1; j >= 0; j--) {
-#else
-    for (i = 0; i < m; i++) {
-	x = 0;
-	ei = (unsigned char) (((unsigned int) v * (unsigned int) T[i]) &
-			      0xFF);
-	for (j = 0; j < m; j++) {
-#endif
 	    x += (unsigned int) T[i + j] +
 		(unsigned int) ei *(unsigned int) PublicKey[j];
 	    T[i + j] = (unsigned char) (x & 0xFF);
@@ -202,13 +162,8 @@ static void MontMult(unsigned char *A, unsigned char *B, unsigned char *C,
     }
 
     x = 0;
-#ifdef LITTLE_ENDIAN
     for (i = m - 1; i >= 0; i--) {
 	x += (unsigned int) T[i] + (unsigned int) A[i];
-#else
-    for (i = 0; i < m; i++) {
-	x += (unsigned int) T[i + m] + (unsigned int) A[i];
-#endif
 	A[i] = (unsigned char) (x & 0xFF);
 	x >>= 8;
     }
@@ -225,11 +180,7 @@ static void MontExp(unsigned char *A, unsigned char *B, unsigned char *PrivateKe
     One(T, m);
     Mont(T, T, PublicKey, m);
 
-#ifdef LITTLE_ENDIAN
     for (i = 0; i < 8 * m; i++) {
-#else
-    for (i = 8 * m - 1; i >= 0; i--) {
-#endif
 	MontMult(T, T, T, PublicKey, v, m);
 	if (BIT(PrivateKey, i, m))
 	    MontMult(T, T, B, PublicKey, v, m);
@@ -286,11 +237,7 @@ void add_it(unsigned char *B, unsigned char *F, int m)
 {
     int ct, tmp;
     carry = 0;
-#ifdef LITTLE_ENDIAN
     for (ct = m - 1; ct >= 0; ct--) {
-#else
-    for (ct = 0; ct < m; ct++) {
-#endif
 	tmp = B[ct] + F[ct] + carry;
 	if (tmp >= 256)
 	    carry = 1;
@@ -377,11 +324,7 @@ void convert_it()
     do {
 	int Yctr;
 
-#ifdef LITTLE_ENDIAN
 	for (ct = chunkLength - 1; ct >= 0; ct--) {
-#else
-	for (ct = 0; ct < chunkLength; ct++) {
-#endif
 	    E[ct] = buffer[Cptr];
 	    Cptr++;
 	}
@@ -401,7 +344,6 @@ void convert_it()
 	    err = 1;
 	}
 	Actr = num2;
-#ifdef LITTLE_ENDIAN
 	Yctr = 0x32;
 	do {
 	    Actr += B[Yctr];
@@ -410,17 +352,6 @@ void convert_it()
 	    ptr5++;
 	    Yctr--;
 	} while (Yctr != 0);
-#else
-        // This is not flipped around yet
-	Yctr = 0x32;
-	do {
-	    Actr += B[Yctr];
-	    Actr &= 255;
-	    result[ptr5] = (unsigned char) (Actr);
-	    ptr5++;
-	    Yctr--;
-	} while (Yctr != 0);
-#endif
 	num2 = Actr;
 	num7++;
     } while (num7 != 256);
@@ -436,13 +367,20 @@ void LynxDecrypt(unsigned char encrypted_data[])
 
     ptrEncrypted = 0xAA;
     c = 410;
-    for (i = 0; i < c; i++) {
-	buffer[i] = encrypted_data[i];
+    
+    // this copies the encrypted loader into the buffer
+    for (i = 0; i < c; i++) 
+    {
+	    buffer[i] = encrypted_data[i];
     }
+
     ptr5 = 0;
     Cptr = 0;
+    
     convert_it();
+    
     ptr5 = 256;
+    
     convert_it();
 }
 
@@ -728,10 +666,5 @@ int main(int argc, char *argv[])
 	    printf("LynxDecrypt fails\n");
     }
 
-    // Test with both expected byte order and inverted byteorder on all keys
-    test(HarrysEncryptedLoader, LynxExponent, LynxPublicKey, false);
-    test(HarrysEncryptedLoader, LynxExponent, LynxPublicKey, true);
-    test(HarrysEncryptedLoader, LynxExponentInverted, LynxPublicKey, false);
-    test(HarrysEncryptedLoader, LynxExponentInverted, LynxPublicKey, true);
     return 0;
 }

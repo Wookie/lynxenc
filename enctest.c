@@ -46,7 +46,9 @@ static void Clear(unsigned char *A, int m)
     int i;
 
     for (i = 0; i < m; i++)
-	A[i] = 0;
+    {
+	    A[i] = 0;
+    }
 }
 
 /* A = 1 */
@@ -80,8 +82,8 @@ static void Double(unsigned char *B, int m)
     /* shouldn't carry */
 }
 
-/* B = (B-N) if B >= N */
-static int Adjust(unsigned char *B, unsigned char *PublicKey, int m)
+/* BB = (BB - NN) */
+static int Adjust(unsigned char *BB, unsigned char *NN, int m)
 {
     int i, x;
     unsigned char T[chunkLength];
@@ -89,15 +91,17 @@ static int Adjust(unsigned char *B, unsigned char *PublicKey, int m)
     x = 0;
     for (i = m - 1; i >= 0; i--) 
     {
-	    x += B[i] - PublicKey[i];
+	    x += BB[i] - NN[i];
 	    T[i] = (unsigned char) (x & 0xFF);
 	    x >>= 8;
     }
 
-    if (x >= 0) {
-	Copy(B, T, m);
+    if (x >= 0) 
+    {
+	    Copy(BB, T, m);
         return 1;
     }
+
     return 0;
 }
 
@@ -232,85 +236,95 @@ static unsigned char LynxPublicKey[chunkLength] = {
 };
 
 
-// B = B + F
-void add_it(unsigned char *B, unsigned char *F, int m)
+// BB = BB + FF
+void add_it(unsigned char *BB, unsigned char *FF, int m)
 {
     int ct, tmp;
     carry = 0;
-    for (ct = m - 1; ct >= 0; ct--) {
-	tmp = B[ct] + F[ct] + carry;
-	if (tmp >= 256)
-	    carry = 1;
-	else
-	    carry = 0;
-	B[ct] = (unsigned char) (tmp);
+    for (ct = m - 1; ct >= 0; ct--) 
+    {
+	    tmp = BB[ct] + FF[ct] + carry;
+	    if (tmp >= 256)
+	        carry = 1;
+	    else
+	        carry = 0;
+	    B[ct] = (unsigned char) (tmp);
     }
 }
 
 /* A = B*(256**m) mod PublicKey */
-static void LynxMontWorks(unsigned char *A1, unsigned char *B1, unsigned char *PublicKey,
-		 int m)
+static void LynxMont(unsigned char *L, /* result */
+                     unsigned char *M, /* original chunk of encrypted data */
+                     unsigned char *N, /* copy of encrypted data */
+                     unsigned char *PublicKey,
+		             int m)
 {
     int Yctr;
 
-    Clear(B, m);
-    Yctr = 0;
-    do {
-	int num8, numA;
-	numA = F[Yctr];
-	num8 = 255;
-	do {
-	    Double(B, m);
-	    carry = (numA & 0x80) / 0x80;
-	    numA = (unsigned char) (numA << 1);
-	    if (carry != 0) {
-		add_it(B, E, m);
-                carry = Adjust(B, PublicKey, m);
-		if (carry != 0)
-                    Adjust(B, PublicKey, m);
-	    } else
-                Adjust(B, PublicKey, m);
-	    num8 = num8 >> 1;
-	} while (num8 != 0);
-	Yctr++;
-    } while (Yctr < m);
-}
+    // L = 0
+    Clear(L, m);
 
-/* A = B*(256**m) mod PublicKey */
-static void LynxMont(unsigned char *A1, unsigned char *B1, unsigned char *PublicKey,
-		 int m)
-{
-    int Yctr;
-
-    Clear(B, m);
     Yctr = 0;
-    do {
-	int num8, numA;
-	numA = F[Yctr];
-	num8 = 255;
-	do {
-	    Double(B, m);
-	    carry = (numA & 0x80) / 0x80;
-	    numA = (unsigned char) (numA << 1);
-	    if (carry != 0) {
-		add_it(B, E, m);
-                carry = Adjust(B, PublicKey, m);
-		if (carry != 0)
-                    Adjust(B, PublicKey, m);
-	    } else
-                Adjust(B, PublicKey, m);
-	    num8 = num8 >> 1;
-	} while (num8 != 0);
-	Yctr++;
+
+    do 
+    {
+	    int num8, numA;
+
+        // get the first byte from N
+	    numA = N[Yctr];
+	    num8 = 255;
+
+        do 
+        {
+            // L = L * 2
+	        Double(L, m);
+
+	        // carry is true if the MSB in numA is set
+            carry = (numA & 0x80) / 0x80;
+
+            // multiply numA by 2
+	        numA = (unsigned char) (numA << 1);
+	    
+            if (carry != 0) 
+            {
+                // L = L + M
+		        add_it(L, M, m);
+
+                // L = L - PublicKey
+                carry = Adjust(L, PublicKey, m);
+
+                // if there is a carry, do it again
+                // L = L - PublicKey
+                if (carry != 0)
+                    Adjust(L, PublicKey, m);
+            } 
+            else
+            {
+                Adjust(L, PublicKey, m);
+            }
+
+	        num8 = num8 >> 1;
+	
+        } while (num8 != 0);
+	
+        Yctr++;
+    
     } while (Yctr < m);
 }
 
 void sub5000(int m)
 {
+    // copy E to F
     Copy(F, E, m);
-    LynxMont(B, E, LynxPublicKey, m);
+
+    // do Montgomery multiplication
+    LynxMont(B, E, F, LynxPublicKey, m);
+
+    // copy B to F
     Copy(F, B, m);
-    LynxMont(B, E, LynxPublicKey, m);
+
+    // do Montgomery multiplication
+    LynxMont(B, E, F, LynxPublicKey, m);
 }
 
 void convert_it()
@@ -321,42 +335,61 @@ void convert_it()
     num7 = buffer[Cptr];
     num2 = 0;
     Cptr++;
-    do {
-	int Yctr;
 
-	for (ct = chunkLength - 1; ct >= 0; ct--) {
-	    E[ct] = buffer[Cptr];
-	    Cptr++;
-	}
-	if ((E[0] | E[1] | E[2]) == 0) {
-	    err = 1;
-	}
-	t1 = ((long) (E[0]) << 16) +
-	    ((long) (E[1]) << 8) +
-	    (long) (E[2]);
-	t2 = ((long) (LynxPublicKey[0]) << 16) +
-	    ((long) (LynxPublicKey[1]) << 8) + (long) (LynxPublicKey[2]);
-	if (t1 > t2) {
-	    err = 1;
-	}
-	sub5000(chunkLength);
-	if (B[0] != 0x15) {
-	    err = 1;
-	}
-	Actr = num2;
-	Yctr = 0x32;
-	do {
-	    Actr += B[Yctr];
-	    Actr &= 255;
-	    result[ptr5] = (unsigned char) (Actr);
-	    ptr5++;
-	    Yctr--;
-	} while (Yctr != 0);
-	num2 = Actr;
-	num7++;
+    do 
+    {
+    	int Yctr;
+
+	    for (ct = chunkLength - 1; ct >= 0; ct--) 
+        {
+	        E[ct] = buffer[Cptr];
+	        Cptr++;
+	    }
+	
+        if ((E[0] | E[1] | E[2]) == 0) 
+        {
+	        err = 1;
+	    }
+	
+        t1 = ((long) (E[0]) << 16) +
+	         ((long) (E[1]) << 8) +
+	          (long) (E[2]);
+	
+        t2 = ((long) (LynxPublicKey[0]) << 16) +
+	         ((long) (LynxPublicKey[1]) << 8) + 
+              (long) (LynxPublicKey[2]);
+	
+        if (t1 > t2) 
+        {
+	        err = 1;
+	    }
+
+	    sub5000(chunkLength);
+	
+        if(B[0] != 0x15) 
+        {
+	        err = 1;
+	    }
+	
+        Actr = num2;
+	    Yctr = 0x32;
+	
+        do 
+        {
+	        Actr += B[Yctr];
+	        Actr &= 255;
+	        result[ptr5] = (unsigned char) (Actr);
+	        ptr5++;
+	        Yctr--;
+	    } while (Yctr != 0);
+
+	    num2 = Actr;
+	    num7++;
+    
     } while (num7 != 256);
+    
     if (Actr != 0) {
-	err = 1;
+	    err = 1;
     }
 }
 

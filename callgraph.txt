@@ -1,0 +1,13 @@
+main() <int main (int argc,char *argv[]) at enctest.c:502>:
+    LynxDecrypt() <void LynxDecrypt (const unsigned char encrypted_data[]) at enctest.c:389>:
+        convert_it() <void convert_it () at enctest.c:322>:
+            sub5000() <void sub5000 (int m) at enctest.c:307>:
+                Copy() <void Copy (unsigned char *A,unsigned char *B,int m) at enctest.c:71>
+                LynxMont() <void LynxMont (unsigned char *L,unsigned char *M,unsigned char *N,const unsigned char *PublicKey,int m) at enctest.c:246>:
+                    Clear() <void Clear (unsigned char *A,int m) at enctest.c:53>
+                    Double() <void Double (unsigned char *B,int m) at enctest.c:80>
+                    add_it() <void add_it (unsigned char *BB,unsigned char *FF,int m) at enctest.c:230>:
+                    Adjust() <int Adjust (unsigned char *BB,const unsigned char *NN,int m) at enctest.c:95>:
+                        Copy() <void Copy (unsigned char *A,unsigned char *B,int m) at enctest.c:71>
+    Compare() <bool Compare (unsigned char *A,const unsigned char *B,int m) at enctest.c:445>:
+    printf()

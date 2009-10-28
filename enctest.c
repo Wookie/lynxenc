@@ -17,26 +17,16 @@
 
 #define CHUNK_LENGTH (51)
 
-int Cptr;
-int carry;
-/* int err; */
-
-unsigned char buffer[600];
-unsigned char result[600];
-unsigned char B[CHUNK_LENGTH];
-unsigned char E[CHUNK_LENGTH];
-unsigned char F[CHUNK_LENGTH];
-
-/* B = 2*B */
-void Double(unsigned char *B, int m)
+/* BB = 2 * BB */
+void Double(unsigned char *BB, int m)
 {
     int i, x;
 
     x = 0;
     for (i = m - 1; i >= 0; i--) 
     {
-	    x += 2 * B[i];
-	    B[i] = (unsigned char) (x & 0xFF);
+	    x += 2 * BB[i];
+	    BB[i] = (unsigned char) (x & 0xFF);
 	    x >>= 8;
     }
     /* shouldn't carry */
@@ -66,10 +56,11 @@ int Adjust(unsigned char *BB, const unsigned char *NN, int m)
 }
 
 // BB = BB + FF
-void add_it(unsigned char *BB, unsigned char *FF, int m)
+void add_it(unsigned char *BB, const unsigned char *FF, int m)
 {
     int ct, tmp;
-    carry = 0;
+    int carry = 0;
+
     for (ct = m - 1; ct >= 0; ct--) 
     {
 	    tmp = BB[ct] + FF[ct] + carry;
@@ -77,18 +68,19 @@ void add_it(unsigned char *BB, unsigned char *FF, int m)
 	        carry = 1;
 	    else
 	        carry = 0;
-	    B[ct] = (unsigned char) (tmp);
+	    BB[ct] = (unsigned char) (tmp);
     }
 }
 
-/* A = B*(256**m) mod PublicKey */
+/* L = M * (256**m) mod PublicKey */
 void LynxMont(unsigned char *L, /* result */
-              unsigned char *M, /* original chunk of encrypted data */
-              unsigned char *N, /* copy of encrypted data */
+              const unsigned char *M, /* original chunk of encrypted data */
+              const unsigned char *N, /* copy of encrypted data */
               const unsigned char *PublicKey,
 		      int m)
 {
     int Yctr;
+    int carry;
 
     // L = 0
     memset(L, 0, m);
@@ -113,7 +105,8 @@ void LynxMont(unsigned char *L, /* result */
 
             // multiply numA by 2
 	        numA = (unsigned char) (numA << 1);
-	    
+	   
+            // if we're going to carry...
             if (carry != 0) 
             {
                 // L = L + M
@@ -143,79 +136,46 @@ void LynxMont(unsigned char *L, /* result */
     } while (Yctr < m);
 }
 
-void sub5000(int m)
-{
-    // copy E to F
-    memcpy(F, E, m);
-
-    // do Montgomery multiplication
-    LynxMont(B, E, F, LynxPublicKey, m);
-
-    // copy B to F
-    memcpy(F, B, m);
-
-    // do Montgomery multiplication
-    LynxMont(B, E, F, LynxPublicKey, m);
-}
-
-void convert_it(int result_index)
+int convert_it(int result_index, int read_index, 
+               unsigned char * result, const unsigned char * encrypted)
 {
     int ct;
     int tmp_val;
     int tmp_cnt;
-    long t1, t2;
+    unsigned char B[CHUNK_LENGTH];
+    unsigned char E[CHUNK_LENGTH];
+    unsigned char F[CHUNK_LENGTH];
 
-    tmp_val = buffer[Cptr];
+    memset(B, 0, CHUNK_LENGTH);
+    memset(E, 0, CHUNK_LENGTH);
+    memset(F, 0, CHUNK_LENGTH);
+
+    tmp_val = encrypted[read_index];
     tmp_cnt = 0;
-    Cptr++;
+    read_index++;
 
     do 
     {
-    	int Yctr;
+    	int Yctr = 0x32;
 
 	    for (ct = CHUNK_LENGTH - 1; ct >= 0; ct--) 
         {
-	        E[ct] = buffer[Cptr];
-	        Cptr++;
+	        E[ct] = encrypted[read_index];
+	        read_index++;
 	    }
 
-        /* not needed, just signals some error condition that isn't acted upon */
-        /*
-        if ((E[0] | E[1] | E[2]) == 0) 
-        {
-	        err = 1;
-	    }
-        */
-	
-        t1 = ((long) (E[0]) << 16) +
-	         ((long) (E[1]) << 8) +
-	          (long) (E[2]);
-	
-        t2 = ((long) (LynxPublicKey[0]) << 16) +
-	         ((long) (LynxPublicKey[1]) << 8) + 
-              (long) (LynxPublicKey[2]);
-	
-        /* not needed, just signals some error condition that isn't acted upon */
-        /*
-        if (t1 > t2) 
-        {
-	        err = 1;
-	    }
-        */
+        // copy E to F
+        memcpy(F, E, CHUNK_LENGTH);
 
-	    sub5000(CHUNK_LENGTH);
-	
-        /* not needed, just signals some error condition that isn't acted upon */
-        /*
-        if(B[0] != 0x15) 
-        {
-	        err = 1;
-	    }
-        */
-	
-        tmp_cnt;
-	    Yctr = 0x32;
-	
+        // do Montgomery multiplication
+        LynxMont(B, E, F, LynxPublicKey, CHUNK_LENGTH);
+
+        // copy B to F
+        memcpy(F, B, CHUNK_LENGTH);
+
+        // do Montgomery multiplication again
+        LynxMont(B, E, F, LynxPublicKey, CHUNK_LENGTH);
+
         do 
         {
 	        tmp_cnt += B[Yctr];
@@ -228,34 +188,33 @@ void convert_it(int result_index)
 	    tmp_val++;
     
     } while (tmp_val != 256);
-    
-    /* not needed, just signals some error condition that isn't acted upon */
-    /*
-    if (tmp_cnt != 0) {
-	    err = 1;
-    }
-    */
+
+    return read_index;
 }
 
 // This is what really happens inside the Atari Lynx at boot time
-void LynxDecrypt(const unsigned char encrypted_data[])
+void LynxDecrypt(const unsigned char * encrypted,
+                 unsigned char * result)
 {
-    memcpy(buffer, encrypted_data, LOADER_LENGTH);
+    int read_index = 0;
 
-    Cptr = 0;
-    
-    convert_it(0);
-    printf("Cptr: %d\n", Cptr);
-    convert_it(256);
-    printf("Cptr: %d\n", Cptr);
+    read_index = convert_it(0, read_index, result, encrypted);
+    printf("read_index: %d\n", read_index);
+
+    read_index = convert_it(256, read_index, result, encrypted);
+    printf("read_index: %d\n", read_index);
 }
 
 int main(int argc, char *argv[])
 {
     int m;
+    unsigned char result[600];
+
+    /* clear out the result buffer */
+    memset(result, 0, 600);
 
     /* decrypt harry's encrypted loader */
-    LynxDecrypt(HarrysEncryptedLoader);
+    LynxDecrypt(HarrysEncryptedLoader, result);
 
     /* compare the results against the plaintext version */
     if(memcmp(result, HarrysPlaintextLoader, LOADER_LENGTH) == 0)

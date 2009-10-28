@@ -1,30 +1,41 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "keys.h"
 #include "loaders.h"
 
-/*
-  Curt Vendell has posted the encryption sources to AtariAge.
-  The encryption sources work by indexing everything with the
-  least significant byte first.
-
-  In the real Atari Lynx hardware the byte order is LITTLE_ENDIAN.
-  If you run this on Intel or AMD CPU then you also have LITTLE_ENDIAN.
-  But the original encryption was run on Amiga that has a BIG_ENDIAN CPU.
-
-  This means that all the keys are presented in BIG_ENDIAN format.
-*/
-
 #define CHUNK_LENGTH (51)
 #define min(x,y) ((x < y) ? x : y)
 
+/* helper function for dumping out blocks of data in a human readable form */
+void print_data(const unsigned char * data, int size)
+{
+    int i = 0;
+    int j, count;
+    int left = size;
+
+    while(i < size)
+    {
+        count = min(8, (size - i));
+
+        printf("    ");
+        for(j = 0; j < count; j++)
+        {
+            printf("0x%02x, ", data[i + j]);
+        }
+        printf("\n");
+        i += count;
+    }
+}
+
+
 /* BB = 2 * BB */
-void Double(unsigned char *BB, int m)
+void double_value(unsigned char *BB, const int length)
 {
     int i, x;
 
     x = 0;
-    for (i = m - 1; i >= 0; i--) 
+    for (i = length - 1; i >= 0; i--) 
     {
 	    x += 2 * BB[i];
 	    BB[i] = (unsigned char) (x & 0xFF);
@@ -33,14 +44,19 @@ void Double(unsigned char *BB, int m)
     /* shouldn't carry */
 }
 
-/* BB = (BB - NN) */
-int Adjust(unsigned char *BB, const unsigned char *NN, int m)
+/* BB -= NN */
+int minus_equals_value(unsigned char *BB, 
+                       const unsigned char *NN, 
+                       const int length)
 {
     int i, x;
-    unsigned char T[CHUNK_LENGTH];
+    unsigned char *T;
+
+    /* allocate temporary buffer */
+    T = calloc(1, length);
 
     x = 0;
-    for (i = m - 1; i >= 0; i--) 
+    for (i = length - 1; i >= 0; i--) 
     {
 	    x += BB[i] - NN[i];
 	    T[i] = (unsigned char) (x & 0xFF);
@@ -49,20 +65,32 @@ int Adjust(unsigned char *BB, const unsigned char *NN, int m)
 
     if (x >= 0) 
     {
-        memcpy(BB, T, m);
+        /* move the result back to BB */
+        memcpy(BB, T, length);
+        
+        /* free the temporary buffer */
+        free(T);
+
+        /* this had a carry */
         return 1;
     }
 
+    /* free the temporary buffer */
+    free(T);
+
+    /* this didn't carry */
     return 0;
 }
 
-// BB = BB + FF
-void add_it(unsigned char *BB, const unsigned char *FF, int m)
+/* BB += FF */
+void plus_equals_value(unsigned char *BB, 
+                     const unsigned char *FF, 
+                     const int length)
 {
     int ct, tmp;
     int carry = 0;
 
-    for (ct = m - 1; ct >= 0; ct--) 
+    for (ct = length - 1; ct >= 0; ct--) 
     {
 	    tmp = BB[ct] + FF[ct] + carry;
 	    if (tmp >= 256)
@@ -74,181 +102,214 @@ void add_it(unsigned char *BB, const unsigned char *FF, int m)
 }
 
 /* L = M * (256**m) mod PublicKey */
-void LynxMont(unsigned char *L, /* result */
-              const unsigned char *M, /* original chunk of encrypted data */
-              const unsigned char *N, /* copy of encrypted data */
-              const unsigned char *PublicKey,
-		      int m)
+void lynx_mont(unsigned char *L,            /* result */
+               const unsigned char *M,      /* original chunk of encrypted data */
+               const unsigned char *N,      /* copy of encrypted data */
+               const unsigned char *modulus,/* modulus */
+		       const int length)
 {
-    int Yctr;
+    int i, j;
     int carry;
 
-    // L = 0
-    memset(L, 0, m);
+    /* L = 0 */
+    memset(L, 0, length);
 
-    Yctr = 0;
-
-    do 
+    for(i = 0; i < length; i++)
     {
-	    int num8, numA;
+	    int numA;
 
-        // get the first byte from N
-	    numA = N[Yctr];
-	    num8 = 255;
+        /* get the byte from N */
+	    numA = N[i];
 
-        do 
+        for(j = 0; j < 8; j++) 
         {
-            // L = L * 2
-	        Double(L, m);
+            /* L = L * 2 */
+	        double_value(L, length);
 
-	        // carry is true if the MSB in numA is set
+	        /* carry is true if the MSB in numA is set */
             carry = (numA & 0x80) / 0x80;
 
-            // multiply numA by 2
+            /* multiply numA by 2 */
 	        numA = (unsigned char) (numA << 1);
 	   
-            // if we're going to carry...
+            /* if we're going to carry... */
             if (carry != 0) 
             {
-                // L = L + M
-		        add_it(L, M, m);
+                /* L += M */
+		        plus_equals_value(L, M, length);
 
-                // L = L - PublicKey
-                carry = Adjust(L, PublicKey, m);
+                /* L -= modulus */
+                carry = minus_equals_value(L, modulus, length);
 
-                // if there is a carry, do it again
-                // L = L - PublicKey
+                /* if there is a carry, do it again
+                 * L -= modulus 
+                 */
                 if (carry != 0)
-                    Adjust(L, PublicKey, m);
+                    minus_equals_value(L, modulus, length);
             } 
             else
             {
-                Adjust(L, PublicKey, m);
+                /* L -= modulus */
+                minus_equals_value(L, modulus, length);
             }
-
-            // divide num8 by 2
-	        num8 = num8 >> 1;
-	
-          // this loop runs 8 times
-        } while (num8 != 0);
-	
-        Yctr++;
-    
-    } while (Yctr < m);
-}
-
-void print_data(const unsigned char * data, int size)
-{
-    int i = 0;
-    int j, count;
-    int left = size;
-
-    while(i < size)
-    {
-        count = min(8, (size - i));
-
-        for(j = 0; j < count; j++)
-        {
-            printf("0x%02x, ", data[i + j]);
         }
-        printf("\n");
-        i += count;
     }
 }
 
-int convert_it(int result_index, int read_index, 
-               unsigned char * result, 
-               const unsigned char * encrypted,
-               const unsigned char * public_key)
+
+/* this decrypts a single block of encrypted data by using the montgomery
+ * multiplication method to do modular exponentiation.
+ */
+int decrypt_block(int accumulator,
+                  unsigned char * result,
+                  const unsigned char * encrypted,
+                  const unsigned char * public_exp,
+                  const unsigned char * public_mod,
+                  const int length)
 {
     int i;
-    int tmp_val;
-    int accumulator;
-    unsigned char A[CHUNK_LENGTH];
-    unsigned char B[CHUNK_LENGTH];
-    unsigned char TMP[CHUNK_LENGTH];
+    unsigned char* rptr = result;
+    const unsigned char* eptr = encrypted;
+    unsigned char *A;
+    unsigned char *B;
+    unsigned char *TMP;
 
-    /* clear out the memory buffers */
-    memset(A, 0, CHUNK_LENGTH);
-    memset(B, 0, CHUNK_LENGTH);
-    memset(TMP, 0, CHUNK_LENGTH);
+    /* allocate the working buffers */
+    A = calloc(1, length);
+    B = calloc(1, length);
+    TMP = calloc(1, length);
 
-    printf("reading %d from index: %d\n", encrypted[read_index], read_index);
-
-    accumulator = 0;
-    tmp_val = encrypted[read_index];
-    read_index++;
-
-    do 
+    /* this copies the next length sized block of data from the encrypted
+     * data into our temporary memory buffer in reverse order */
+    for(i = length - 1; i >= 0; i--) 
     {
-        /* this copies the next CHUNK_LENGTH block of data from the encrypted
-         * data into our temporary memory buffer in reverse order */
-        for(i = CHUNK_LENGTH - 1; i >= 0; i--) 
-        {
-	        B[i] = encrypted[read_index];
-	        read_index++;
-	    }
+        B[i] = *eptr;
+        eptr++;
+    }
 
-        /* so it took me a while to wrap my head around this because I couldn't
-         * figure out how the exponent was used in the process.  RSA is 
-         * a ^ b (mod c) and I couldn't figure out how that was being done until
-         * I realized that the public exponent for decryption is just 3.  That
-         * means that to decrypt each block, we only have to multiply each
-         * block by itself twice to raise it to the 3rd power:
-         * n^3 == n * n * n
-         *
-         * so this loop is a "per-block" loop and for each block we do the following:
-         * 1. make a copy of the block into a temp block
-         * 2. multiply the block by the copy in the temp block
-         * 3. copy the result into the temp block
-         * 4. multiply the block by the accumulated/modulated result in the temp block
-         * 5. copy the result into the output block
-         */
-        
-        
-        // copy E to F
-        memcpy(TMP, B, CHUNK_LENGTH);
+    /* so it took me a while to wrap my head around this because I couldn't
+     * figure out how the exponent was used in the process.  RSA is 
+     * a ^ b (mod c) and I couldn't figure out how that was being done until
+     * I realized that the public exponent for decryption is just 3.  That
+     * means that to decrypt each block, we only have to multiply each
+     * block by itself twice to raise it to the 3rd power:
+     * n^3 == n * n * n
+     *
+     * so this loop is a "per-block" loop and for each block we do the following:
+     * 1. make a copy of the block into a temp block
+     * 2. multiply the block by the copy in the temp block
+     * 3. copy the result into the temp block
+     * 4. multiply the block by the accumulated/modulated result in the temp block
+     * 5. copy the result into the output block
+     */
 
-        // do Montgomery multiplication
-        LynxMont(A, B, TMP, public_key, CHUNK_LENGTH);
+    /* TODO: convert this to a loop that calls lynx_mont public_exp number of
+     * times so that we raise the encrypted block of data to the power of
+     * public_exp and mod it by public_mod.
+     */
 
-        // copy B to F
-        memcpy(TMP, A, CHUNK_LENGTH);
+    /* do Montgomery multiplication: A = B^2 */
+    lynx_mont(A, B, B, public_mod, length);
 
-        // do Montgomery multiplication again
-        LynxMont(A, B, TMP, public_key, CHUNK_LENGTH);
+    /* copy the result into the temp buffer: TMP = B^2 */
+    memcpy(TMP, A, length);
 
-        /* I'm not sure what this does...I can see that it is copying the results
-         * data to the output results buffer but I don't know why it is doing an
-         * accumulation and masking...maybe this is the modulus operation of
-         * Montgomery multiplication.
-         */
-        for(i = CHUNK_LENGTH - 1; i > 0; i--)
-        {
-            accumulator += A[i];
-            accumulator &= 0xFF;
-            result[result_index] = (unsigned char)(accumulator);
-            result_index++;
-        }
-        
-        tmp_val++;
+    /* do Montgomery multiplication again: A = B^3 */
+    lynx_mont(A, B, TMP, public_mod, length);
+
+    /* So I'm not sure if this is part of the Montgomery multiplication 
+     * algorithm since I don't fully understand how that works.  This may be
+     * just another obfuscation step done during the encryption process. 
+     * The output of the decryption process has to be accumulated and masked
+     * to get the original bytes.  If I had to place a bet, I would bet that
+     * this is not part of Montgomery multiplication and is just an obfuscation
+     * preprocessing step done on the plaintext data before it gets encrypted.
+     */
+    for(i = length - 1; i > 0; i--)
+    {
+        accumulator += A[i];
+        accumulator &= 0xFF;
+        (*rptr) = (unsigned char)(accumulator);
+        rptr++;
+    }
     
-    } while (tmp_val != 256);
+    /* free the temporary buffer memory */
+    free(A);
+    free(B);
+    free(TMP);
 
-    return read_index;
+    return accumulator;
 }
 
-// This is what really happens inside the Atari Lynx at boot time
-void LynxDecrypt(const unsigned char * encrypted,
-                 unsigned char * result)
+
+/* this function decrypts a single frame of encrypted data. a frame consists of
+ * a single byte block count followed by the count number of blocks of
+ * encrypted data.
+ */
+int decrypt_frame(unsigned char * result, 
+                  const unsigned char * encrypted,
+                  const unsigned char * public_exp,
+                  const unsigned char * public_mod,
+                  const int length)
 {
-    int read_index;
+    int i, j;
+    int blocks;
+    int accumulator;
+    unsigned char* rptr = result;
+    const unsigned char* eptr = encrypted;
 
-    read_index = convert_it(0, 0, result, 
-                            encrypted, LynxPublicKey);
+    /* reset the accumulator for the modulus step */
+    accumulator = 0;
 
-    read_index = convert_it(256, read_index, result, 
-                            encrypted, LynxPublicKey);
+    /* calculate how many encrypted blocks there are */
+    blocks = 256 - *eptr;
+
+    /* move our index to the beginning of the next block */
+    eptr++;
+
+    for(i = 0; i < blocks; i++)
+    {
+        /* decrypt a single block of encrypted data */
+        accumulator = decrypt_block(accumulator, rptr, eptr, public_exp, public_mod, length);
+
+        /* move result pointer ahead */
+        rptr += (length - 1);
+
+        /* move read pointer ahead */
+        eptr += length;
+    }
+
+    /* return the number of blocks decrypted */
+    return blocks;
+}
+
+/* this is a completely refactored version of what happens in the Lynx at boot
+ * time.  the original code was a very rough reverse of the Lynx ROM code, this
+ * is much easier to understand.
+ */
+void lynx_decrypt(unsigned char * result,
+                  const unsigned char * encrypted,
+                  const int length)
+{
+    int blocks = 0;
+    int read_index = 0;
+
+    /* decrypt the first frame of encrypted data */
+    blocks = decrypt_frame(&result[0],
+                           &encrypted[read_index], 
+                           /* lynx_public_exp */ 0,
+                           lynx_public_mod,
+                           length);
+
+    /* adjust the read index */
+    read_index = 1 + (blocks * length);
+
+    /* decrypte the second frame of encrypted data */
+    blocks = decrypt_frame(&result[256],  
+                           &encrypted[read_index], 
+                           /* lynx_public_exp */ 0,
+                           lynx_public_mod,
+                           length);
 }
 
 int main(int argc, char *argv[])
@@ -260,10 +321,10 @@ int main(int argc, char *argv[])
     memset(result, 0, 600);
 
     /* decrypt harry's encrypted loader */
-    LynxDecrypt(HarrysEncryptedLoader, result);
+    lynx_decrypt(result, HarrysEncryptedLoader, CHUNK_LENGTH);
 
     /* compare the results against the plaintext version */
-    if(memcmp(result, HarrysPlaintextLoader, LOADER_LENGTH) == 0)
+    if(memcmp(result, HarrysFullPlaintextLoader, 506) == 0)
     	printf("LynxDecrypt works\n");
     else 
 	    printf("LynxDecrypt fails\n");

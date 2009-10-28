@@ -16,6 +16,7 @@
 */
 
 #define CHUNK_LENGTH (51)
+#define min(x,y) ((x < y) ? x : y)
 
 /* BB = 2 * BB */
 void Double(unsigned char *BB, int m)
@@ -136,58 +137,101 @@ void LynxMont(unsigned char *L, /* result */
     } while (Yctr < m);
 }
 
+void print_data(const unsigned char * data, int size)
+{
+    int i = 0;
+    int j, count;
+    int left = size;
+
+    while(i < size)
+    {
+        count = min(8, (size - i));
+
+        for(j = 0; j < count; j++)
+        {
+            printf("0x%02x, ", data[i + j]);
+        }
+        printf("\n");
+        i += count;
+    }
+}
+
 int convert_it(int result_index, int read_index, 
                unsigned char * result, 
                const unsigned char * encrypted,
                const unsigned char * public_key)
 {
-    int ct;
+    int i;
     int tmp_val;
-    int tmp_cnt;
+    int accumulator;
+    unsigned char A[CHUNK_LENGTH];
     unsigned char B[CHUNK_LENGTH];
-    unsigned char E[CHUNK_LENGTH];
-    unsigned char F[CHUNK_LENGTH];
+    unsigned char TMP[CHUNK_LENGTH];
 
+    /* clear out the memory buffers */
+    memset(A, 0, CHUNK_LENGTH);
     memset(B, 0, CHUNK_LENGTH);
-    memset(E, 0, CHUNK_LENGTH);
-    memset(F, 0, CHUNK_LENGTH);
+    memset(TMP, 0, CHUNK_LENGTH);
 
+    printf("reading %d from index: %d\n", encrypted[read_index], read_index);
+
+    accumulator = 0;
     tmp_val = encrypted[read_index];
-    tmp_cnt = 0;
     read_index++;
 
     do 
     {
-    	int Yctr = 0x32;
-
-	    for (ct = CHUNK_LENGTH - 1; ct >= 0; ct--) 
+        /* this copies the next CHUNK_LENGTH block of data from the encrypted
+         * data into our temporary memory buffer in reverse order */
+        for(i = CHUNK_LENGTH - 1; i >= 0; i--) 
         {
-	        E[ct] = encrypted[read_index];
+	        B[i] = encrypted[read_index];
 	        read_index++;
 	    }
 
+        /* so it took me a while to wrap my head around this because I couldn't
+         * figure out how the exponent was used in the process.  RSA is 
+         * a ^ b (mod c) and I couldn't figure out how that was being done until
+         * I realized that the public exponent for decryption is just 3.  That
+         * means that to decrypt each block, we only have to multiply each
+         * block by itself twice to raise it to the 3rd power:
+         * n^3 == n * n * n
+         *
+         * so this loop is a "per-block" loop and for each block we do the following:
+         * 1. make a copy of the block into a temp block
+         * 2. multiply the block by the copy in the temp block
+         * 3. copy the result into the temp block
+         * 4. multiply the block by the accumulated/modulated result in the temp block
+         * 5. copy the result into the output block
+         */
+        
+        
         // copy E to F
-        memcpy(F, E, CHUNK_LENGTH);
+        memcpy(TMP, B, CHUNK_LENGTH);
 
         // do Montgomery multiplication
-        LynxMont(B, E, F, public_key, CHUNK_LENGTH);
+        LynxMont(A, B, TMP, public_key, CHUNK_LENGTH);
 
         // copy B to F
-        memcpy(F, B, CHUNK_LENGTH);
+        memcpy(TMP, A, CHUNK_LENGTH);
 
         // do Montgomery multiplication again
-        LynxMont(B, E, F, public_key, CHUNK_LENGTH);
+        LynxMont(A, B, TMP, public_key, CHUNK_LENGTH);
 
-        do 
+        /* I'm not sure what this does...I can see that it is copying the results
+         * data to the output results buffer but I don't know why it is doing an
+         * accumulation and masking...maybe this is the modulus operation of
+         * Montgomery multiplication.
+         */
+        for(i = CHUNK_LENGTH - 1; i > 0; i--)
         {
-	        tmp_cnt += B[Yctr];
-	        tmp_cnt &= 255;
-	        result[result_index] = (unsigned char) (tmp_cnt);
-	        result_index++;
-	        Yctr--;
-	    } while (Yctr != 0);
-
-	    tmp_val++;
+            accumulator += A[i];
+            accumulator &= 0xFF;
+            result[result_index] = (unsigned char)(accumulator);
+            result_index++;
+        }
+        
+        tmp_val++;
     
     } while (tmp_val != 256);
 
@@ -202,11 +246,9 @@ void LynxDecrypt(const unsigned char * encrypted,
 
     read_index = convert_it(0, 0, result, 
                             encrypted, LynxPublicKey);
-    printf("read_index: %d\n", read_index);
 
     read_index = convert_it(256, read_index, result, 
                             encrypted, LynxPublicKey);
-    printf("read_index: %d\n", read_index);
 }
 
 int main(int argc, char *argv[])

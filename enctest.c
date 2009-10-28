@@ -137,7 +137,9 @@ void LynxMont(unsigned char *L, /* result */
 }
 
 int convert_it(int result_index, int read_index, 
-               unsigned char * result, const unsigned char * encrypted)
+               unsigned char * result, 
+               const unsigned char * encrypted,
+               const unsigned char * public_key)
 {
     int ct;
     int tmp_val;
@@ -168,13 +170,13 @@ int convert_it(int result_index, int read_index,
         memcpy(F, E, CHUNK_LENGTH);
 
         // do Montgomery multiplication
-        LynxMont(B, E, F, LynxPublicKey, CHUNK_LENGTH);
+        LynxMont(B, E, F, public_key, CHUNK_LENGTH);
 
         // copy B to F
         memcpy(F, B, CHUNK_LENGTH);
 
         // do Montgomery multiplication again
-        LynxMont(B, E, F, LynxPublicKey, CHUNK_LENGTH);
+        LynxMont(B, E, F, public_key, CHUNK_LENGTH);
 
         do 
         {
@@ -196,12 +198,14 @@ int convert_it(int result_index, int read_index,
 void LynxDecrypt(const unsigned char * encrypted,
                  unsigned char * result)
 {
-    int read_index = 0;
+    int read_index;
 
-    read_index = convert_it(0, read_index, result, encrypted);
+    read_index = convert_it(0, 0, result, 
+                            encrypted, LynxPublicKey);
     printf("read_index: %d\n", read_index);
 
-    read_index = convert_it(256, read_index, result, encrypted);
+    read_index = convert_it(256, read_index, result, 
+                            encrypted, LynxPublicKey);
     printf("read_index: %d\n", read_index);
 }
 

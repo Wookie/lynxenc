@@ -1,5 +1,5 @@
 all:
-	gcc -gstabs+ -O0 enctest.c -o enctest
+	gcc -gstabs+ -O0 lynxdec.c -o lynxdec
 
 clean:
-	rm -rf enctest
+	rm -rf lynxdec

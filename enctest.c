@@ -17,15 +17,9 @@
 
 #define CHUNK_LENGTH (51)
 
-int c;
-int num2;
-int num7;
-int ptr5;
 int Cptr;
-int Actr;
 int carry;
-int err;
-int ptrEncrypted;
+/* int err; */
 
 unsigned char buffer[600];
 unsigned char result[600];
@@ -89,10 +83,10 @@ void add_it(unsigned char *BB, unsigned char *FF, int m)
 
 /* A = B*(256**m) mod PublicKey */
 void LynxMont(unsigned char *L, /* result */
-                     unsigned char *M, /* original chunk of encrypted data */
-                     unsigned char *N, /* copy of encrypted data */
-                     const unsigned char *PublicKey,
-		             int m)
+              unsigned char *M, /* original chunk of encrypted data */
+              unsigned char *N, /* copy of encrypted data */
+              const unsigned char *PublicKey,
+		      int m)
 {
     int Yctr;
 
@@ -164,13 +158,15 @@ void sub5000(int m)
     LynxMont(B, E, F, LynxPublicKey, m);
 }
 
-void convert_it()
+void convert_it(int result_index)
 {
     int ct;
+    int tmp_val;
+    int tmp_cnt;
     long t1, t2;
 
-    num7 = buffer[Cptr];
-    num2 = 0;
+    tmp_val = buffer[Cptr];
+    tmp_cnt = 0;
     Cptr++;
 
     do 
@@ -182,11 +178,14 @@ void convert_it()
 	        E[ct] = buffer[Cptr];
 	        Cptr++;
 	    }
-	
+
+        /* not needed, just signals some error condition that isn't acted upon */
+        /*
         if ((E[0] | E[1] | E[2]) == 0) 
         {
 	        err = 1;
 	    }
+        */
 	
         t1 = ((long) (E[0]) << 16) +
 	         ((long) (E[1]) << 8) +
@@ -196,62 +195,59 @@ void convert_it()
 	         ((long) (LynxPublicKey[1]) << 8) + 
               (long) (LynxPublicKey[2]);
 	
+        /* not needed, just signals some error condition that isn't acted upon */
+        /*
         if (t1 > t2) 
         {
 	        err = 1;
 	    }
+        */
 
 	    sub5000(CHUNK_LENGTH);
 	
+        /* not needed, just signals some error condition that isn't acted upon */
+        /*
         if(B[0] != 0x15) 
         {
 	        err = 1;
 	    }
+        */
 	
-        Actr = num2;
+        tmp_cnt;
 	    Yctr = 0x32;
 	
         do 
         {
-	        Actr += B[Yctr];
-	        Actr &= 255;
-	        result[ptr5] = (unsigned char) (Actr);
-	        ptr5++;
+	        tmp_cnt += B[Yctr];
+	        tmp_cnt &= 255;
+	        result[result_index] = (unsigned char) (tmp_cnt);
+	        result_index++;
 	        Yctr--;
 	    } while (Yctr != 0);
 
-	    num2 = Actr;
-	    num7++;
+	    tmp_val++;
     
-    } while (num7 != 256);
+    } while (tmp_val != 256);
     
-    if (Actr != 0) {
+    /* not needed, just signals some error condition that isn't acted upon */
+    /*
+    if (tmp_cnt != 0) {
 	    err = 1;
     }
+    */
 }
 
 // This is what really happens inside the Atari Lynx at boot time
 void LynxDecrypt(const unsigned char encrypted_data[])
 {
-    int i;
+    memcpy(buffer, encrypted_data, LOADER_LENGTH);
 
-    ptrEncrypted = 0xAA;
-    c = LOADER_LENGTH;
-    
-    // this copies the encrypted loader into the buffer
-    for (i = 0; i < c; i++) 
-    {
-	    buffer[i] = encrypted_data[i];
-    }
-
-    ptr5 = 0;
     Cptr = 0;
     
-    convert_it();
-    
-    ptr5 = 256;
-    
-    convert_it();
+    convert_it(0);
+    printf("Cptr: %d\n", Cptr);
+    convert_it(256);
+    printf("Cptr: %d\n", Cptr);
 }
 
 int main(int argc, char *argv[])

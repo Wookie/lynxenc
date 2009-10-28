@@ -2,8 +2,10 @@
 #define _LOADERS_H_
 
 #define LOADER_LENGTH (410)
+#define FULL_LOADER_LENGTH (506)
 
-// The 410 byte miniloader created by Harry for the cc65 compiler
+/* The 410 byte encrypted form of Harry's miniloader created by Harry for 
+ * the cc65 compiler. */
 const unsigned char HarrysEncryptedLoader[LOADER_LENGTH] = {
     0xFD, 0xC1, 0x0D, 0x8E, 0xE9, 0xEE, 0x09, 0x13,
     0xE5, 0x96, 0x0C, 0x34, 0x64, 0xDA, 0xD4, 0xBB,
@@ -59,7 +61,7 @@ const unsigned char HarrysEncryptedLoader[LOADER_LENGTH] = {
     0xE6, 0x21
 };
 
-// This is Harrys miniloader in plaintext
+/* this is Harrys truncated miniloader in plaintext */
 const unsigned char HarrysPlaintextLoader[LOADER_LENGTH] = {
     0x80, 0x00, 0x20, 0x4f, 0x02, 0x64, 0x05, 0xe6,
     0x06, 0xa9, 0x08, 0x8d, 0x8b, 0xfd, 0x4c, 0x4a,
@@ -115,7 +117,8 @@ const unsigned char HarrysPlaintextLoader[LOADER_LENGTH] = {
     0xfc, 0xa0
 };
 
-const unsigned char HarrysFullPlaintextLoader[506] = {
+/* the full decrypted form of Harry's mini loader */
+const unsigned char HarrysFullPlaintextLoader[FULL_LOADER_LENGTH] = {
     0x80, 0x00, 0x20, 0x4f, 0x02, 0x64, 0x05, 0xe6, 
     0x06, 0xa9, 0x08, 0x8d, 0x8b, 0xfd, 0x4c, 0x4a, 
     0xfe, 0xa2, 0x00, 0x20, 0x00, 0x03, 0xa2, 0x0b, 

@@ -29,79 +29,79 @@ void print_data(const unsigned char * data, int size)
 }
 
 
-/* BB = 2 * BB */
-void double_value(unsigned char *BB, const int length)
+/* result = 2 * result */
+void double_value(unsigned char *result, const int length)
 {
     int i, x;
 
     x = 0;
     for (i = length - 1; i >= 0; i--) 
     {
-	    x += 2 * BB[i];
-	    BB[i] = (unsigned char) (x & 0xFF);
+	    x += 2 * result[i];
+	    result[i] = (unsigned char) (x & 0xFF);
 	    x >>= 8;
     }
     /* shouldn't carry */
 }
 
-/* BB -= NN */
-int minus_equals_value(unsigned char *BB, 
-                       const unsigned char *NN, 
+/* result -= value */
+int minus_equals_value(unsigned char *result, 
+                       const unsigned char *value, 
                        const int length)
 {
     int i, x;
-    unsigned char *T;
+    unsigned char *tmp;
 
     /* allocate temporary buffer */
-    T = calloc(1, length);
+    tmp = calloc(1, length);
 
     x = 0;
     for (i = length - 1; i >= 0; i--) 
     {
-	    x += BB[i] - NN[i];
-	    T[i] = (unsigned char) (x & 0xFF);
+	    x += result[i] - value[i];
+	    tmp[i] = (unsigned char) (x & 0xFF);
 	    x >>= 8;
     }
 
     if (x >= 0) 
     {
         /* move the result back to BB */
-        memcpy(BB, T, length);
+        memcpy(result, tmp, length);
         
         /* free the temporary buffer */
-        free(T);
+        free(tmp);
 
         /* this had a carry */
         return 1;
     }
 
     /* free the temporary buffer */
-    free(T);
+    free(tmp);
 
     /* this didn't carry */
     return 0;
 }
 
-/* BB += FF */
-void plus_equals_value(unsigned char *BB, 
-                     const unsigned char *FF, 
-                     const int length)
+/* result += value */
+void plus_equals_value(unsigned char *result, 
+                       const unsigned char *value, 
+                       const int length)
 {
-    int ct, tmp;
+    int i, tmp;
     int carry = 0;
 
-    for (ct = length - 1; ct >= 0; ct--) 
+    for(i = length - 1; i >= 0; i--) 
     {
-	    tmp = BB[ct] + FF[ct] + carry;
+	    tmp = result[i] + value[i] + carry;
 	    if (tmp >= 256)
 	        carry = 1;
 	    else
 	        carry = 0;
-	    BB[ct] = (unsigned char) (tmp);
+	    result[i] = (unsigned char) (tmp);
     }
 }
 
-/* L = M * (256**m) mod PublicKey */
+/* L = M * N mod modulus */
 void lynx_mont(unsigned char *L,            /* result */
                const unsigned char *M,      /* original chunk of encrypted data */
                const unsigned char *N,      /* copy of encrypted data */
@@ -110,45 +110,47 @@ void lynx_mont(unsigned char *L,            /* result */
 {
     int i, j;
     int carry;
+    unsigned char tmp;
+    unsigned char increment;
 
     /* L = 0 */
     memset(L, 0, length);
 
     for(i = 0; i < length; i++)
     {
-	    int numA;
-
-        /* get the byte from N */
-	    numA = N[i];
+        /* get the next byte from N */
+	    tmp = N[i];
 
         for(j = 0; j < 8; j++) 
         {
             /* L = L * 2 */
 	        double_value(L, length);
 
-	        /* carry is true if the MSB in numA is set */
-            carry = (numA & 0x80) / 0x80;
+	        /* carry is true if the MSB in tmp is set */
+            increment = (tmp & 0x80) / 0x80;
 
-            /* multiply numA by 2 */
-	        numA = (unsigned char) (numA << 1);
+            /* shift tmp's bits to the left by one */
+	        tmp <<= 1;
 	   
-            /* if we're going to carry... */
-            if (carry != 0) 
+            if(increment != 0) 
             {
+                /* increment the result... */
                 /* L += M */
 		        plus_equals_value(L, M, length);
 
+                /* do a modulus correction */
                 /* L -= modulus */
                 carry = minus_equals_value(L, modulus, length);
 
-                /* if there is a carry, do it again
-                 * L -= modulus 
-                 */
+                /* if there was a carry, do it again */
+                /* L -= modulus */
                 if (carry != 0)
                     minus_equals_value(L, modulus, length);
             } 
             else
             {
+                /* instead decrement the result */
+
                 /* L -= modulus */
                 minus_equals_value(L, modulus, length);
             }
@@ -190,22 +192,16 @@ int decrypt_block(int accumulator,
     /* so it took me a while to wrap my head around this because I couldn't
      * figure out how the exponent was used in the process.  RSA is 
      * a ^ b (mod c) and I couldn't figure out how that was being done until
-     * I realized that the public exponent for decryption is just 3.  That
+     * I realized that the public exponent for lynx decryption is just 3.  That
      * means that to decrypt each block, we only have to multiply each
      * block by itself twice to raise it to the 3rd power:
      * n^3 == n * n * n
-     *
-     * so this loop is a "per-block" loop and for each block we do the following:
-     * 1. make a copy of the block into a temp block
-     * 2. multiply the block by the copy in the temp block
-     * 3. copy the result into the temp block
-     * 4. multiply the block by the accumulated/modulated result in the temp block
-     * 5. copy the result into the output block
      */
 
     /* TODO: convert this to a loop that calls lynx_mont public_exp number of
-     * times so that we raise the encrypted block of data to the power of
-     * public_exp and mod it by public_mod.
+     * times so that we can raise the encrypted block of data to the power of
+     * public_exp and mod it by public_mod. this will make this flexible
+     * enough to be used to encrypt data as well.
      */
 
     /* do Montgomery multiplication: A = B^2 */
@@ -314,17 +310,17 @@ void lynx_decrypt(unsigned char * result,
 
 int main(int argc, char *argv[])
 {
-    int m;
-    unsigned char result[600];
+    /* create a memory buffer to receive the results */
+    unsigned char result[FULL_LOADER_LENGTH];
 
     /* clear out the result buffer */
-    memset(result, 0, 600);
+    memset(result, 0, FULL_LOADER_LENGTH);
 
     /* decrypt harry's encrypted loader */
     lynx_decrypt(result, HarrysEncryptedLoader, CHUNK_LENGTH);
 
-    /* compare the results against the plaintext version */
-    if(memcmp(result, HarrysFullPlaintextLoader, 506) == 0)
+    /* compare the results against the full plaintext version */
+    if(memcmp(result, HarrysFullPlaintextLoader, FULL_LOADER_LENGTH) == 0)
     	printf("LynxDecrypt works\n");
     else 
 	    printf("LynxDecrypt fails\n");

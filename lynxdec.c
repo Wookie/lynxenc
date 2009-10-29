@@ -28,6 +28,22 @@ void print_data(const unsigned char * data, int size)
     }
 }
 
+void print_data_reverse(const unsigned char * data, int size)
+{
+    int i;
+    unsigned char * tmp = calloc(1, size);
+    unsigned char * p = tmp;
+
+    for(i = size - 1; i >= 0; i--)
+    {
+        (*p) = data[i];
+        p++;
+    }
+
+    print_data(tmp, size);
+    free(tmp);
+}
+
 
 /* result = 2 * result */
 void double_value(unsigned char *result, const int length)
@@ -228,6 +244,7 @@ int decrypt_block(int accumulator,
         (*rptr) = (unsigned char)(accumulator);
         rptr++;
     }
+    print_data(result, length);
     
     /* free the temporary buffer memory */
     free(A);

@@ -44,6 +44,22 @@ void print_data(const unsigned char * data, int size)
     }
 }
 
+void print_data_reverse(const unsigned char * data, int size)
+{
+    int i;
+    unsigned char * tmp = calloc(1, size);
+    unsigned char * p = tmp;
+
+    for(i = size - 1; i >= 0; i--)
+    {
+        (*p) = data[i];
+        p++;
+    }
+
+    print_data(tmp, size);
+    free(tmp);
+}
+
 BIGNUM* load_reverse(const unsigned char* buf, const int length)
 {
     BIGNUM* bn;

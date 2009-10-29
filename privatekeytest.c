@@ -107,6 +107,28 @@ void decrypt_block(unsigned char * out,
     BN_free(result);
 }
 
+void decrypt_block_r(unsigned char * out,
+                   const unsigned char * in,
+                   const int block_length,
+                   BIGNUM * exponent,
+                   BIGNUM * modulus,
+                   BN_CTX * ctx)
+{
+    BIGNUM * result = BN_new();
+
+    /* load the data to process */
+    BIGNUM * block = load_reverse(in, block_length);
+
+    /* do the RSA step */
+    BN_mod_exp(result, block, exponent, modulus, ctx);
+
+    /* copy the result to the output buffer */
+    BN_bn2bin(result, out);
+
+    /* free up the result bignum */
+    BN_free(result);
+}
+
 /* this lets me try different permutations of the key files to generate
  * different possible decrypted private keys */
 void do_rsa(unsigned char * out,
@@ -123,6 +145,26 @@ void do_rsa(unsigned char * out,
 
     /* decrypt the block of data */
     decrypt_block(out, encrypted, CHUNK_LENGTH, bn_exponent, bn_modulus, ctx);
+
+    BN_free(bn_modulus);
+    BN_free(bn_exponent);
+    BN_CTX_free(ctx);
+}
+
+void do_rsa_r(unsigned char * out,
+            const unsigned char * encrypted,
+            const unsigned char * exponent,
+            const unsigned char * modulus)
+{
+    BIGNUM * bn_exponent = load(exponent, CHUNK_LENGTH);
+    BIGNUM * bn_modulus = load(modulus, CHUNK_LENGTH);
+    BN_CTX *ctx = BN_CTX_new();
+
+    /* zero out the result */
+    memset(out, 0, CHUNK_LENGTH);
+
+    /* decrypt the block of data */
+    decrypt_block_r(out, encrypted, CHUNK_LENGTH, bn_exponent, bn_modulus, ctx);
 
     BN_free(bn_modulus);
     BN_free(bn_exponent);
@@ -149,10 +191,64 @@ void check(const unsigned char * msg,
     }
 }
 
-int main (int argc, const char * argv[]) 
+void multiply_blocks(const unsigned char * l,
+                     const unsigned char * r)
+{
+    BIGNUM * result = BN_new();
+    BIGNUM * bn_l = load(l, CHUNK_LENGTH);
+    BIGNUM * bn_r = load(r, CHUNK_LENGTH);
+    BN_CTX *ctx = BN_CTX_new();
+
+    BN_mul(result, bn_l, bn_r, ctx);
+    print_number(result);
+
+    BN_free(bn_r);
+    BN_free(bn_l);
+    BN_free(result);
+    BN_CTX_free(ctx);
+}
+
+void try_permutation(const unsigned char * msg,
+                     const unsigned char * pkey,
+                     const unsigned char * pexp,
+                     const unsigned char * pmod)
 {
     unsigned char result[CHUNK_LENGTH];
     unsigned char lynx_private_exp[CHUNK_LENGTH];
+
+    /* now try to decode the private key based on Karri's guess */
+    do_rsa(lynx_private_exp, pkey, pexp, pmod);
+
+    /* then try to encrypt the known good data */
+    do_rsa(result, obfuscated_block1_frame1,
+           lynx_private_exp, lynx_public_mod);
+    check(msg, 
+          obfuscated_block1_frame1, result, 
+          reversed_encrypted_block1_frame1);
+}
+
+void try_permutation_r(const unsigned char * msg,
+                     const unsigned char * pkey,
+                     const unsigned char * pexp,
+                     const unsigned char * pmod)
+{
+    unsigned char result[CHUNK_LENGTH];
+    unsigned char lynx_private_exp[CHUNK_LENGTH];
+
+    /* now try to decode the private key based on Karri's guess */
+    do_rsa_r(lynx_private_exp, pkey, pexp, pmod);
+
+    /* then try to encrypt the known good data */
+    do_rsa(result, obfuscated_block1_frame1,
+           lynx_private_exp, lynx_public_mod);
+    check(msg, 
+          obfuscated_block1_frame1, result, 
+          reversed_encrypted_block1_frame1);
+}
+
+int main (int argc, const char * argv[]) 
+{
+    unsigned char result[CHUNK_LENGTH];
 
     /* according to the documentation on RSA, the way the public/private exponents
      * are related is that encryption works like so:
@@ -185,15 +281,21 @@ int main (int argc, const char * argv[])
     check("Plain keyfile.3", obfuscated_block1_frame1, 
           result, reversed_encrypted_block1_frame1);
     
-    /* now try to decode the private key based on Karri's guess */
-    do_rsa(lynx_private_exp, keyfile_1, keyfile_2, keyfile_3);
-
-    /* then try to encrypt the known good data */
-    do_rsa(result, obfuscated_block1_frame1,
-           lynx_private_exp, lynx_public_mod);
-    check("Priv Exp: 1, Prot Exp: 2, Prot Mod: 3", 
-          obfuscated_block1_frame1, result, 
-          reversed_encrypted_block1_frame1);
+    /* try all permutations without reversing data */
+    try_permutation("pk: 1, exp: 2, m: 3", keyfile_1, keyfile_2, keyfile_3);
+    try_permutation("pk: 1, exp: 3, m: 2", keyfile_1, keyfile_3, keyfile_2);
+    try_permutation("pk: 2, exp: 1, m: 3", keyfile_2, keyfile_1, keyfile_3);
+    try_permutation("pk: 2, exp: 3, m: 1", keyfile_2, keyfile_3, keyfile_1);
+    try_permutation("pk: 3, exp: 1, m: 2", keyfile_3, keyfile_1, keyfile_2);
+    try_permutation("pk: 3, exp: 2, m: 1", keyfile_3, keyfile_2, keyfile_1);
     
+    /* try all permutations with only the pk reversed */
+    try_permutation_r("rpk: 1, exp: 2, m: 3", keyfile_1, keyfile_2, keyfile_3);
+    try_permutation_r("rpk: 1, exp: 3, m: 2", keyfile_1, keyfile_3, keyfile_2);
+    try_permutation_r("rpk: 2, exp: 1, m: 3", keyfile_2, keyfile_1, keyfile_3);
+    try_permutation_r("rpk: 2, exp: 3, m: 1", keyfile_2, keyfile_3, keyfile_1);
+    try_permutation_r("rpk: 3, exp: 1, m: 2", keyfile_3, keyfile_1, keyfile_2);
+    try_permutation_r("rpk: 3, exp: 2, m: 1", keyfile_3, keyfile_2, keyfile_1);
+
     return 0;
 }

@@ -175,6 +175,9 @@ kloop1:
 	lea	keybuild+51,a2                  ; load pointer to second keyfile data in a2
 	lea	keybuild+102,a3                 ; load pointer to third keyfile data in a3
 	moveq	#50,d0                      ; put #50 in d0, probably to loop 51 times using dbra
+;
+; this is where the private exponent is calucalted by xoring the keyfile data together
+;
 resloop:
 	move.b	(a1)+,d1                    ; put byte of first keyfile data in d1
 	move.b	(a2)+,d2                    ; put byte of second keyfile data in d2
@@ -191,7 +194,9 @@ resloop:
 	lea	kahuna,a3                       ; put pointer to first byte of xor'd data in a3
 ;
 	moveq	#50,d0                      ; put #50 in d0, probably to loop 51 times with dbra
-
+;
+; NOTE: pele data is the public modulus.
+;
 revers:
 	move.b	(a1)+,-(a0)                 ; reverse pele data into N_num buffer
 	move.b	(a3)+,-(a2)                 ; reverse xor'd keyfile data into C_num buffer
@@ -240,14 +245,14 @@ gotitem:
 	bpl	goodfile                        ; branch to goodfile if no errors
 ;
 filexit:
-	pea	msg2(pc)		;put out text file error message
+	pea	msg2(pc)		                ; put out text file error message
 writexit:
 sizexit:
 	move.w	#9,-(sp)
 	trap	#1
 	addq.l	#6,sp
 ;
-	pea	input0+2(pc)		;tell 'em which file name
+	pea	input0+2(pc)		            ; tell 'em which file name
 	move.w	#9,-(sp)
 	trap	#1
 	addq.l	#6,sp
@@ -258,7 +263,7 @@ exy:
 	addq.l	#6,sp
 ;
 	move.w	#CON,-(sp)
-	move.w	#CONIN,-(sp)	;user banging on keyboard
+	move.w	#CONIN,-(sp)	            ; user banging on keyboard
 	trap	#13
 	addq.l	#4,sp
 ;
@@ -279,7 +284,7 @@ goodfile:
 	trap	#1                          ; call GEMDOS
 	addq.l	#6,sp                       ; pop parameters off of stack
 ;
-	pea	encrmsg1                        ; 
+	pea	encrmsg1                        
 	move.w	#9,-(sp)
 	trap	#1
 	addq.l	#6,sp
@@ -289,14 +294,14 @@ goodfile:
 	move.w	handle(pc),-(sp)            ; put file handle on stack
 	move.w	#$3f,-(sp)	                ; #$3f is GEMDOS fread
 	trap	#1                          ; call GEMDOS
-	adda.w	#12,sp                      ; pop parameters off of stack
-*
+	adda.w	#12,sp                      ; pop parameters off of stack, d0 has return value
+;
 	tst.l	d0                          ; test for error
 	bmi	filexit		                    ; exit if read error
-*
+;
 	moveq	#0,d1		                ; assume file size 128k
 	cmpi.l	#$20000,d0	                ; is this our size?
-	beq.s	gotsize
+	beq.s	gotsize                     ; branch to gotsize if we read 128k of data
 	moveq	#1,d1
 	cmpi.l	#$40000,d0	                ; check 256k
 	beq.s	gotsize
@@ -309,84 +314,85 @@ gotsize:
 ;
 ;   Size is set in d1
 ;
-	move.l	d0,size                     ; d1  0=1M, 1=2M
+	move.l	d0,size                     ; d1  0=1Mbit, 1=2Mbit cart
 ;
-	move.w	d1,-(sp)
+	move.w	d1,-(sp)                    ; save d1 on stack
 ;
-	move.w	handle,-(sp)
-	move.w	#$3e,-(sp)
-	trap	#1			                ; close file
-	addq.l	#4,sp
+	move.w	handle,-(sp)                ; put handle on stack
+	move.w	#$3e,-(sp)                  ; #$3e is GEMDOS fclose
+	trap	#1			                ; call GEMDOS
+	addq.l	#4,sp                       ; pop params off of stack
 ;
-	move.w	(sp)+,d1
-; NOW WE'RE GETTING DOWN TO BUSINESS
-; at this point the key file has been prepared, the rom file is loaded
-; and now we're going to encrypt things...
-
-	lea	RandPage,a0
-	lea	hash,a1
+	move.w	(sp)+,d1                    ; restore d1 from stack
+;    
+;   NOW WE'RE GETTING DOWN TO BUSINESS
+;   at this point the key file has been prepared, the rom file is loaded
+;   and now we're going to encrypt things...
+;
+	lea	RandPage,a0                     ; load RandPage pointer in a0
+	lea	hash,a1                         ; load hash pointer in a1
 
 	moveq	#11,d0		                ; clear out 3 x 16 byte accums
-	move.l	a1,a2
+	move.l	a1,a2                       ; copy a1 to a2
 clearx:
-	clr.l	(a2)+
-	dbra	d0,clearx
+	clr.l	(a2)+                       ; clear the long
+	dbra	d0,clearx                   ; loop 12 times
 ;
-	lea	romimg,a3
+	lea	romimg,a3                       ; load romimg pointer in a3, it is a buffer big enough for a 256K rom
 ;
-	tst.w	d1
-	bne	do2meg
-	bsr	hash1M		;hash a 1 Meg
-	lea	boot1,a0
-	lea	boot1e,a1
-	bra	donemeg
+	tst.w	d1                          ; test to see if d1 is 0, meaning a 1Mbit cart
+	bne	do2meg                          ; if it isn't 0, we branch to do2meg
+	bsr	hash1M		                    ; otherwise branch to the 1meg hash function
+	lea	boot1,a0                        ; load pointer to boot1 in a0
+	lea	boot1e,a1                       ; load pointer to boot1e in a1
+	bra	donemeg                         ; branch to donemeg
 do2meg:
-	bsr	hash2M		;hash a 2 Meg
-	lea	boot2,a0
-	lea	boot2e,a1
+	bsr	hash2M		                    ; hash a 2 Meg
+	lea	boot2,a0                        ; load pointer to boot2 in a0
+	lea	boot2e,a1                       ; load pointer to boot2e in a1
 donemeg:
-	lea	romimg+$9a,a2	;copy last 5 blocks
+	lea	romimg+$9a,a2	                ; copy last 5 blocks
 	move.w	#255,d0
 block5:
-	move.b	(a1)+,(a2)+
+	move.b	(a1)+,(a2)+                 ; this copies the last 5 encrypted blocks into place as is
 	dbra	d0,block5
 ;
-	lea	code6502,a2
+	lea	code6502,a2                     ; load pointer to code6502 into a2
 	move.w	#511,d0
 common:
-	move.b	(a0)+,(a2)+
+	move.b	(a0)+,(a2)+                 ; copy the boot loader plaintext into code6502 buffer
 	dbra	d0,common
 ;
-	lea	code6502,a0
+	lea	code6502,a0                     ; load pointer to code6502 into a0
 ;
-	lea	$41(a0),a1	;copy 1st 2 ROMDIR entrys
+	lea	$41(a0),a1	                    ; copy 1st 2 ROMDIR entrys
 	lea	romimg+410,a2
 ;
-	moveq	#1,d0		;copy 2 entries
+	moveq	#1,d0		                ; copy 2 entries
 entrz:
-	move.b	(a2)+,(a1)+	;page
+	move.b	(a2)+,(a1)+	                ; page
 ;
-	move.b	(a2)+,(a1)+	;offset
+	move.b	(a2)+,(a1)+	                ; offset
 	move.b	(a2)+,(a1)+
 ;	
-	addq.l	#1,a2		;skip flags
+	addq.l	#1,a2		                ; skip flags
 ;
-	move.b	(a2)+,(a1)+	;dest
+	move.b	(a2)+,(a1)+	                ; dest
 	move.b	(a2)+,(a1)+
 ;	
-	move.b	(a2)+,(a1)+	;size
+	move.b	(a2)+,(a1)+	                ; size
 	move.b	(a2)+,(a1)+
 ;	
 	dbra	d0,entrz	
 ;
 	lea	$2f(a0),a1
-	lea	romimg+414,a2	;F0_Dest	
+	lea	romimg+414,a2	                ; F0_Dest	
 ;
 	move.b	(a2)+,d0
-	move.b	d0,(a1)+	;lsb
+	move.b	d0,(a1)+	                ; lsb
 ;
 	move.b	(a2)+,d1
-	move.b	d1,(a1)+	;msb
+	move.b	d1,(a1)+	                ; msb
 ;
 	lsl.w	#8,d1
 	move.b	d0,d1
@@ -403,10 +409,11 @@ entrz:
 	lea	hash,a2
 	moveq	#15,d0
 hashere:
-	move.b	(a2)+,(a1)+
+	move.b	(a2)+,(a1)+                 ; copy the hash to the right spot in code6502 buffer
 	dbra	d0,hashere
 ;
-;  do some other tricky transform
+; do some other tricky transform
+; this is the obfuscation step
 ;
 	move.l	a0,a1
 	move.w	#511,d0
@@ -421,20 +428,20 @@ shifloop:
 ;
 ;  Now prepare 50 byte chunks for RSA
 ;
-	move.l	a0,a1		;a1 -> src
-	lea	romimg,a3	;a3 -> dst
+	move.l	a0,a1		                ; a1 -> src
+	lea	romimg,a3	                    ; a3 -> dst
 	moveq	#2,d7
-	bsr	MultRSA		;do 3 blocks
+	bsr	MultRSA		                    ; do 3 blocks
 ;
 ;	lea	$100(a0),a1
-;	moveq	#4,d7		;do 5 blocks
+;	moveq	#4,d7		                ; do 5 blocks
 ;	bsr	MultRSA
 ;
 ;  we're done
 ;
 	clr.w	-(sp)
 	pea	input0+2(pc)
-	move.w	#$3c,-(sp)	;create file
+	move.w	#$3c,-(sp)	                ; create file
 	trap	#1
 	addq.l	#8,sp
 ;
@@ -442,25 +449,25 @@ shifloop:
 	bpl	goodwr
 ;
 badwr:
-	pea	badwrmsg(pc)		;"write error"
+	pea	badwrmsg(pc)		            ; "write error"
 	bra	writexit
 goodwr:
 	move.l	#romimg,-(sp)
 	move.l	size,-(sp)
 	move.w	handle,-(sp)
 	move.w	#$40,-(sp)
-	trap	#1			;write it out
+	trap	#1			                ; write it out
 	adda.w	#12,sp
 
 	cmp.l	-8(sp),d0
-	bne	badwr			;check for good write
+	bne	badwr			                ; check for good write
 ;
 	move.w	handle,-(sp)
 	move.w	#$3e,-(sp)
-	trap	#1			;close file
+	trap	#1			                ; close file
 	addq.l	#4,sp
 ;
-	bra	anymore
+	bra	anymore                         ; go back to the top to do it all over again
 ;
 ;
 ;
@@ -473,7 +480,7 @@ MultRSA:
 	move.l	a0,-(sp)	
 	moveq	#$ff,d0
 	sub.b	d7,d0
-	move.b	d0,(a3)+	;stuff neg count for this group
+	move.b	d0,(a3)+	                ; stuff neg count for this group
 ;
 Multloop:
 	lea	B_num,a2

@@ -249,6 +249,7 @@ void try_permutation_r(const unsigned char * msg,
 int main (int argc, const char * argv[]) 
 {
     unsigned char result[CHUNK_LENGTH];
+    unsigned char test[CHUNK_LENGTH];
 
     /* according to the documentation on RSA, the way the public/private exponents
      * are related is that encryption works like so:
@@ -264,11 +265,31 @@ int main (int argc, const char * argv[])
      */
 
     /* first do known good inputs and outputs to verify the steps are working */
+    printf("Standard Lynx decryption we know works, we feed in the first block of the encrypted loader:\n");
+    printf("Input:\n");
+    print_data(reversed_encrypted_block1_frame1, CHUNK_LENGTH);
     do_rsa(result, reversed_encrypted_block1_frame1, 
            lynx_public_exp, lynx_public_mod);
     check("Known good data", reversed_encrypted_block1_frame1,
            result, obfuscated_block1_frame1);
-    
+    printf("Output:\n");
+    print_data(result, CHUNK_LENGTH);
+    printf("The output is the first block of the plaintext loader in obfuscated/padded format.\n\n");
+
+    memcpy(test, result, CHUNK_LENGTH);
+
+    printf("Now we take that output, and feed it back through the RSA step, this time using the lynx private exponent\n");
+    printf("Input:\n");
+    print_data(test, CHUNK_LENGTH);
+    do_rsa(result, test, lynx_private_exp, lynx_public_mod);
+    check("Calculated private exponent", test,
+          result, reversed_encrypted_block1_frame1);
+    printf("Output:\n");
+    print_data(result, CHUNK_LENGTH);
+    printf("The output is the first block of the encrypted loader, proving that we can go both ways now!!!\n\n");
+
+
+#if 0
     /* try encrypting with each individual key file first...who knows, maybe the
      * private exponent isn't encrypted */
     do_rsa(result, obfuscated_block1_frame1, keyfile_1, lynx_public_mod);
@@ -296,6 +317,6 @@ int main (int argc, const char * argv[])
     try_permutation_r("rpk: 2, exp: 3, m: 1", keyfile_2, keyfile_3, keyfile_1);
     try_permutation_r("rpk: 3, exp: 1, m: 2", keyfile_3, keyfile_1, keyfile_2);
     try_permutation_r("rpk: 3, exp: 2, m: 1", keyfile_3, keyfile_2, keyfile_1);
-
+#endif
     return 0;
 }

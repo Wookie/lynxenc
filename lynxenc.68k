@@ -1,0 +1,1078 @@
+;
+;  Encrypt a Lynx Cart
+;
+	.globl	ModExp_
+;
+;
+PRN	equ	0
+AUX	equ	1
+CON	equ	2
+*
+CONSTAT	equ	1
+CONIN	equ	2
+CONOUT	equ	3
+OUTSTAT	equ	8
+;
+;
+start:
+	movea.l	4(sp),a5
+	move.l	#stack,sp
+;
+	move.l	$c(a5),d0	;get program length
+	add.l	$14(a5),d0
+	add.l	$1c(a5),d0
+	add.l	#$100,d0
+;
+	move.l	d0,-(sp)	;  for m_shrink
+	move.l	a5,-(sp)
+	move.w	d0,-(sp)
+	move.w	#$4a,-(sp)
+	trap	#1
+	adda.w	#12,sp
+;
+;  M_shrink has been performed
+;
+;
+;
+	.dc.w	$a00a		;hide mouse
+;
+	lea	RandPage,a0
+	move.l	a0,a1
+	moveq	#0,d0
+clearlp:
+	move.b	d0,(a1)+
+	addq.w	#1,d0
+	cmpi.w	#256,d0
+	bne	clearlp
+;
+	move.w	#$12,d0
+	move.w	#$47,d1
+	move.w	#$39,d2
+
+	moveq	#7,d7
+buildlp0:
+	moveq	#0,d5
+; d0 - seed0
+; d1 - seed1
+; d2 - seed2
+; d3 - accum
+; d4 - temp
+buildlp:
+	move.b	d0,d3	;lda seed0
+	move.b	d0,d4
+	lsr.b	#2,d3	;lsr, lsr
+	not.b	d4
+	lsr.b	#2,d4	;for ~cy
+	subx.b	d0,d3	;sbc seed0
+	lsr.b	#1,d3
+	roxl.b	#1,d1
+	roxl.b	#1,d2
+	roxr.b	#1,d0
+	move.b	d0,d3
+	addx.b	d1,d3
+	eor.b	d2,d3
+	move.b	(a0,d3.w),d6
+	move.b	(a0,d5.w),(a0,d3.w)
+	move.b	d6,(a0,d5.w)
+	addq.w	#1,d5
+	cmpi.w	#256,d5	
+	bne	buildlp
+	dbra	d7,buildlp0
+;
+;
+;
+;  Read in the 3 golden disks
+;
+	move.l	#signon,-(sp)	            ; print sign-on msg
+	move.w	#9,-(sp)                    ; #9 is GEMDOS print to std out
+	trap	#1                          ; call GEMDOS
+	addq.l	#6,sp                       ; pop trap parameters off stack
+;
+	moveq	#2,d7
+	lea	keybuild,a0                     ; put pointer to file read buffer in a0
+	lea	keyname,a1                      ; put pointer to keyfile name pointer in a1
+keyloop:
+	movem.l	a0-a1/d7,-(sp)              ; save a0-a1/d7
+;
+	move.l	#keymsg,-(sp)	            ; "Place key disk x in drive A:"
+	move.w	#9,-(sp)                    ; #9 is GEMDOS print to std out
+	trap	#1                          ; call GEMDOS
+	addq.l	#6,sp                       ; pop trap parameters off stack
+;
+	addq.b	#1,keynbr
+;
+	move.w	#CON,-(sp)                  ; 
+	move.w	#CONIN,-(sp)	            ; wait for keyboard
+	trap	#13                         ; call BIOS to wait for keybord input
+	addq.l	#4,sp                       ; pop trap parameters off stack
+;
+	movem.l	(sp)+,a0-a1/d7              ; restore a0-a1/d7
+;
+;
+	movem.l	a0-a1/d7,-(sp)              ; save a0-a1/d7
+;
+	clr.w	-(sp)                       ; open file in read only mode
+	move.l	a1,-(sp)	                ; put file name address on stack
+	move.w	#$3d,-(sp)                  ; #$3d is GEMDOS fopen function
+	trap	#1                          ; call GEMDOS
+	addq.l	#8,sp                       ; pop trap parameters off stack
+;
+	move.w	d0,handle                   ; story file handle in handle
+	bpl	goodkey                         ; jump to goodkey if no error
+badkey:
+	pea	msgx(pc)
+	move.w	#9,-(sp)
+	trap	#1
+	addq.l	#6,sp
+;
+	bra	exy
+goodkey:
+	movem.l	(sp)+,a0-a1/d7              ; restore a0-a1/d7
+
+	movem.l	a1/d7,-(sp)                 ; save a1/d7
+
+	move.l	a0,-(sp)	                ; put address of file read buffer on stack
+	move.l	#1000,-(sp)	                ; put number of bytes to read on stack
+	move.w	handle(pc),-(sp)            ; put file handle on stack
+	move.w	#$3f,-(sp)	                ; #$3f is GEMDOS fread function
+	trap	#1                          ; call GEMDOS
+	addq.l	#8,sp                       ; pop trap parameters off of stack
+	move.l	(sp)+,a0                    ; restore a0 from stack
+	movem.l	(sp)+,a1/d7                 ; restore a1/d7 from stack
+;
+	tst.l	d0                          ; set ccr N if negative, d0 will be negative if error
+	bmi	badkey		                    ; this will branch if d0 was negative
+;
+	adda.w	d0,a0                       ; add number of bytes read to buffer pointer
+	adda.w	#12,a1                      ; move file name pointer to next file name
+
+	movem.l	a0-a1/d7,-(sp)              ; save a0-a1/d7
+;
+	move.w	handle,-(sp)                ; put file handle on stack
+	move.w	#$3e,-(sp)                  ; #$3d is GEMDOS fclose function
+	trap	#1			                ; call GEMDOS
+	addq.l	#4,sp                       ; pop trap parameters from the stack
+;
+	movem.l	(sp)+,a0-a1/d7              ; restore a0-a1/d7
+	dbra	d7,keyloop                  ; d7 starts at #2, this makes the loop run 3 times, once for each keyfile disk
+;
+;  now combine the key disks
+;
+	lea	keybuild,a0                     ; put the file read buffer pointer in a0
+	move.l	a0,a1                       ; copy the pointer into a1 as well
+	moveq	#2,d3                       ; put 2 in d3, we're going to loop three times
+kloop:
+	moveq	#50,d2                      ; put 50 in d2 (process 50 bytes perhaps?)
+kloop1:
+	bsr	getbyte                         ; call getbyte subroutine convert the first two ascii hex bytes to int val in d0
+	move.b	d0,(a1)+                    ; move value into output buffer
+	dbra	d2,kloop1                   ; since dbra branches until d2 is -1, this loop converts 51 bytes
+	addq.l	#2,a0                       ; move a0 to the beginning of the next key file data
+	dbra	d3,kloop                    ; loop three times to convert all three key files
+;
+	lea	kahuna,a0                       ; load address of keybuild[-1] in a0
+	lea	keybuild+0,a1                   ; load pointer to first keyfile data in a1
+	lea	keybuild+51,a2                  ; load pointer to second keyfile data in a2
+	lea	keybuild+102,a3                 ; load pointer to third keyfile data in a3
+	moveq	#50,d0                      ; put #50 in d0, probably to loop 51 times using dbra
+resloop:
+	move.b	(a1)+,d1                    ; put byte of first keyfile data in d1
+	move.b	(a2)+,d2                    ; put byte of second keyfile data in d2
+	move.b	(a3)+,d3                    ; put byte of third keyfile data in d3
+	eor.b	d2,d1                       ; xor d2 and d1, store in d1
+	eor.b	d3,d1                       ; xor d3 and d1, store in d1
+	move.b	d1,(a0)+                    ; store the resulting value
+	dbra	d0,resloop                  ; loop 51 times
+;
+;
+	lea	N_num+51,a0                     ; put address of last byte of xor'd data in a0
+	lea	pele,a1                         ; put pointer to "pele" data in a1
+	lea	C_num+51,a2                     ; put pointer to second to last byte of xor'd data in a2
+	lea	kahuna,a3                       ; put pointer to first byte of xor'd data in a3
+;
+	moveq	#50,d0                      ; put #50 in d0, probably to loop 51 times with dbra
+
+revers:
+	move.b	(a1)+,-(a0)                 ; reverse pele data into N_num buffer
+	move.b	(a3)+,-(a2)                 ; reverse xor'd keyfile data into C_num buffer
+	dbra	d0,revers
+;
+;
+;  Read in HandyRom cart image to romimg buffer
+;
+;
+anymore:
+	move.l	#msg0,-(sp)	                ; put pointer to signon message on stack
+	move.w	#9,-(sp)                    ; #9 is GEMDOS print to stdout
+	trap	#1                          ; call GEMDOS
+	addq.l	#6,sp                       ; pop parameters off of stack
+;
+	.dc.w	$a009		                ; show mouse
+	bsr	Itemsel                         ; show dialog to select item
+	.dc.w	$a00a		                ; hide mouse
+;
+	lea	fs_inpat,a1
+	lea	input0+2(pc),a2
+	move.l	a2,a0
+regot:
+	move.b	(a1)+,(a2)+
+	bne	regot
+;
+	subq.l	#1,a2
+reback:
+	cmpi.b	#"\\",-(a2)
+	bne	reback
+;
+	addq.l	#1,a2
+	lea	fs_insel,a1
+regot1:
+	move.b	(a1)+,(a2)+
+	bne	regot1
+;
+gotitem:
+	move.w	#0,-(sp)                    ; open rom file read only
+	move.l	a0,-(sp)		            ; file name of rom file to open
+	move.w	#$3d,-(sp)                  ; #$3d is GEMDOS fopen
+	trap	#1                          ; call GEMDOS
+	addq.l	#8,sp                       ; pop parameters off of stack
+;
+	move.w	d0,handle                   ; copy file handle to handle
+	bpl	goodfile                        ; branch to goodfile if no errors
+;
+filexit:
+	pea	msg2(pc)		;put out text file error message
+writexit:
+sizexit:
+	move.w	#9,-(sp)
+	trap	#1
+	addq.l	#6,sp
+;
+	pea	input0+2(pc)		;tell 'em which file name
+	move.w	#9,-(sp)
+	trap	#1
+	addq.l	#6,sp
+exy:
+	pea	quitmsg
+	move.w	#9,-(sp)
+	trap	#1
+	addq.l	#6,sp
+;
+	move.w	#CON,-(sp)
+	move.w	#CONIN,-(sp)	;user banging on keyboard
+	trap	#13
+	addq.l	#4,sp
+;
+;
+	clr.w	-(sp)
+	trap	#1
+;
+;
+;
+goodfile:
+	pea	encrmsg0                        ; put pointer to encrypt message on stack
+	move.w	#9,-(sp)                    ; #9 is GEMDOS print to std out
+	trap	#1                          ; call GEMDOS
+	addq.l	#6,sp                       ; pop parameters off of stack
+;
+	pea	input0+2(pc)		            ; tell 'em which file name
+	move.w	#9,-(sp)                    ; #9 is GEMDOS print to std out
+	trap	#1                          ; call GEMDOS
+	addq.l	#6,sp                       ; pop parameters off of stack
+;
+	pea	encrmsg1                        ; 
+	move.w	#9,-(sp)
+	trap	#1
+	addq.l	#6,sp
+;
+	move.l	#romimg,-(sp)	            ; load rom image here
+	move.l	#$40000,-(sp)	            ; max size allowed is 256k
+	move.w	handle(pc),-(sp)            ; put file handle on stack
+	move.w	#$3f,-(sp)	                ; #$3f is GEMDOS fread
+	trap	#1                          ; call GEMDOS
+	adda.w	#12,sp                      ; pop parameters off of stack
+*
+	tst.l	d0                          ; test for error
+	bmi	filexit		                    ; exit if read error
+*
+	moveq	#0,d1		                ; assume file size 128k
+	cmpi.l	#$20000,d0	                ; is this our size?
+	beq.s	gotsize
+	moveq	#1,d1
+	cmpi.l	#$40000,d0	                ; check 256k
+	beq.s	gotsize
+;
+	pea	msg3(pc)	                    ; tell them we don't handle this size
+	bra	sizexit
+;
+gotsize:
+	move.b	#"1",blknbr	                ; set message to 1st block #
+;
+;   Size is set in d1
+;
+	move.l	d0,size                     ; d1  0=1M, 1=2M
+;
+	move.w	d1,-(sp)
+;
+	move.w	handle,-(sp)
+	move.w	#$3e,-(sp)
+	trap	#1			                ; close file
+	addq.l	#4,sp
+;
+	move.w	(sp)+,d1
+; NOW WE'RE GETTING DOWN TO BUSINESS
+; at this point the key file has been prepared, the rom file is loaded
+; and now we're going to encrypt things...
+
+	lea	RandPage,a0
+	lea	hash,a1
+
+	moveq	#11,d0		                ; clear out 3 x 16 byte accums
+	move.l	a1,a2
+clearx:
+	clr.l	(a2)+
+	dbra	d0,clearx
+;
+	lea	romimg,a3
+;
+	tst.w	d1
+	bne	do2meg
+	bsr	hash1M		;hash a 1 Meg
+	lea	boot1,a0
+	lea	boot1e,a1
+	bra	donemeg
+do2meg:
+	bsr	hash2M		;hash a 2 Meg
+	lea	boot2,a0
+	lea	boot2e,a1
+donemeg:
+	lea	romimg+$9a,a2	;copy last 5 blocks
+	move.w	#255,d0
+block5:
+	move.b	(a1)+,(a2)+
+	dbra	d0,block5
+;
+	lea	code6502,a2
+	move.w	#511,d0
+common:
+	move.b	(a0)+,(a2)+
+	dbra	d0,common
+;
+	lea	code6502,a0
+;
+	lea	$41(a0),a1	;copy 1st 2 ROMDIR entrys
+	lea	romimg+410,a2
+;
+	moveq	#1,d0		;copy 2 entries
+entrz:
+	move.b	(a2)+,(a1)+	;page
+;
+	move.b	(a2)+,(a1)+	;offset
+	move.b	(a2)+,(a1)+
+;	
+	addq.l	#1,a2		;skip flags
+;
+	move.b	(a2)+,(a1)+	;dest
+	move.b	(a2)+,(a1)+
+;	
+	move.b	(a2)+,(a1)+	;size
+	move.b	(a2)+,(a1)+
+;	
+	dbra	d0,entrz	
+;
+	lea	$2f(a0),a1
+	lea	romimg+414,a2	;F0_Dest	
+;
+	move.b	(a2)+,d0
+	move.b	d0,(a1)+	;lsb
+;
+	move.b	(a2)+,d1
+	move.b	d1,(a1)+	;msb
+;
+	lsl.w	#8,d1
+	move.b	d0,d1
+	add.w	#$20,d1
+;
+	lea	$76(a0),a1
+	move.b	d1,(a1)
+	lsr.w	#8,d1
+	move.b	d1,-(a1)
+;
+;  Now, just the Hash is left to patch
+;
+	lea	$85(a0),a1
+	lea	hash,a2
+	moveq	#15,d0
+hashere:
+	move.b	(a2)+,(a1)+
+	dbra	d0,hashere
+;
+;  do some other tricky transform
+;
+	move.l	a0,a1
+	move.w	#511,d0
+	moveq	#0,d1
+shifloop:
+	move.b	(a1),d2
+	move.w	d2,d3
+	sub.b	d1,d2
+	move.b	d3,d1
+	move.b	d2,(a1)+
+	dbra	d0,shifloop
+;
+;  Now prepare 50 byte chunks for RSA
+;
+	move.l	a0,a1		;a1 -> src
+	lea	romimg,a3	;a3 -> dst
+	moveq	#2,d7
+	bsr	MultRSA		;do 3 blocks
+;
+;	lea	$100(a0),a1
+;	moveq	#4,d7		;do 5 blocks
+;	bsr	MultRSA
+;
+;  we're done
+;
+	clr.w	-(sp)
+	pea	input0+2(pc)
+	move.w	#$3c,-(sp)	;create file
+	trap	#1
+	addq.l	#8,sp
+;
+	move.w	d0,handle
+	bpl	goodwr
+;
+badwr:
+	pea	badwrmsg(pc)		;"write error"
+	bra	writexit
+goodwr:
+	move.l	#romimg,-(sp)
+	move.l	size,-(sp)
+	move.w	handle,-(sp)
+	move.w	#$40,-(sp)
+	trap	#1			;write it out
+	adda.w	#12,sp
+
+	cmp.l	-8(sp),d0
+	bne	badwr			;check for good write
+;
+	move.w	handle,-(sp)
+	move.w	#$3e,-(sp)
+	trap	#1			;close file
+	addq.l	#4,sp
+;
+	bra	anymore
+;
+;
+;
+;  a1 -> src
+;  a3 -> dst
+;
+;  d7 = block count (-1)
+;
+MultRSA:
+	move.l	a0,-(sp)	
+	moveq	#$ff,d0
+	sub.b	d7,d0
+	move.b	d0,(a3)+	;stuff neg count for this group
+;
+Multloop:
+	lea	B_num,a2
+	moveq	#49,d0
+nextchk:
+	move.b	(a1)+,(a2)+
+	dbra	d0,nextchk
+	move.b	#$15,(a2)
+;
+	movem.l	a1/a3/d7,-(sp)
+;
+	pea	blockmsg
+	move.w	#9,-(sp)
+	trap	#1
+	addq.l	#6,sp
+;
+	addi.b	#1,blknbr
+;
+	move.w	#51,-(sp)
+	pea	N_num
+	pea	C_num
+	pea	B_num
+	pea	A_num
+	jsr	ModExp_
+	adda.w	#18,sp
+;
+	movem.l	(sp)+,a1/a3/d7
+;
+	lea	A_num,a2
+	moveq	#50,d0
+getres:
+	move.b	(a2)+,(a3)+
+	dbra	d0,getres
+	dbra	d7,Multloop
+	move.l	(sp)+,a0
+	rts
+;
+;
+;
+;
+;  a0 -> RandPage
+;  a1 -> hash
+;  a3 -> romimg
+;
+hash1M:
+	move.w	#$3f00,d5		;Xcount
+;
+	move.w	#255,d7
+alcartlp:
+	moveq	#15,d6
+alcartin:
+	moveq	#-1,d0
+	lsr.w	#1,d0		;set x
+	moveq	#15,d2
+readlp:
+	move.b	(a3)+,d1
+	move.b	(a3)+,d0
+	addx.b	d0,d1
+	move.b	d1,32(a1,d2.w)
+	dbra	d2,readlp
+;
+	lsr.w	#1,d5		;skip first 8
+	bne	innerx
+;
+	moveq	#1,d3
+
+	move.l	#0,a4		;HashAccum-1
+
+	moveq	#0,d0
+	lsr.w	#1,d0		;clear x
+hashlp0:
+	moveq	#31,d2
+hashlp1:
+	move.b	16(a1,d2.w),d1
+	addx.b	d1,d0
+	move.b	d0,16(a1,d2.w)
+	move.l	a4,d4
+	and.w	#$ff,d4
+	addx.b	d4,d0
+	move.b	(a0,d0.w),d0
+	adda.w	#1,a4
+	dbra	d2,hashlp1
+	dbra	d3,hashlp0
+;
+	moveq	#15,d2
+copyh:
+	move.b	(a1,d2.w),d0
+	move.b	16(a1,d2.w),d1
+	eor.b	d1,d0
+	move.b	d0,(a1,d2.w)
+	move.b	d0,16(a1,d2.w)
+	dbra	d2,copyh
+innerx:
+	dbra	d6,alcartin
+	dbra	d7,alcartlp
+	rts
+;
+;
+;  a0 -> RandPage
+;  a1 -> hash
+;  a3 -> romimg
+;
+hash2M:
+	move.w	#$00ff,d5		;Xcount
+;
+;
+	move.w	#255,d7
+acartlp:
+	moveq	#15,d6
+acartin:
+	moveq	#-1,d0
+	lsr.w	#1,d0		;set x
+	moveq	#15,d2
+radlp:
+	move.b	(a3)+,d1
+	move.b	(a3)+,d0
+	addx.b	d0,d1
+	move.b	(a3)+,d0
+	addx.b	d0,d1
+	move.b	(a3)+,d0
+	addx.b	d0,d1
+	move.b	d1,32(a1,d2.w)
+	dbra	d2,radlp
+;
+	lsr.w	#1,d5		;skip first 8
+	bne	inerx
+;
+	moveq	#1,d3
+
+	move.l	#0,a4		;HashAccum-1
+
+	moveq	#0,d0
+	lsr.w	#1,d0		;clear x
+hshlp0:
+	moveq	#31,d2
+hshlp1:
+	move.b	16(a1,d2.w),d1
+	addx.b	d1,d0
+	move.b	d0,16(a1,d2.w)
+	move.l	a4,d4
+	and.w	#$ff,d4
+	addx.b	d4,d0
+	move.b	(a0,d0.w),d0
+	adda.w	#1,a4
+	dbra	d2,hshlp1
+	dbra	d3,hshlp0
+;
+	moveq	#15,d2
+cpyh:
+	move.b	(a1,d2.w),d0
+	move.b	16(a1,d2.w),d1
+	eor.b	d1,d0
+	move.b	d0,(a1,d2.w)
+	move.b	d0,16(a1,d2.w)
+	dbra	d2,cpyh
+inerx:
+	dbra	d6,acartin
+	dbra	d7,acartlp
+	rts
+;
+;
+*
+*
+*  Bring up item selector
+*
+*
+Itemsel:
+	move.w	#$19,-(sp)		;get default drive
+	trap	#1
+	addq.l	#2,sp
+*
+	movea.l	#fs_inpat,a0
+	move.b	d0,(a0)
+	addi.b	#"A",(a0)+
+	move.b	#":",(a0)+
+*
+	addq.b	#1,d0
+	ext.w	d0
+	move.w	d0,-(sp)
+	move.l	a0,-(sp)
+	move.w	#$47,-(sp)		;get current directory
+	trap	#1
+	addq.l	#2,sp
+	move.l	(sp)+,a0
+	addq.l	#2,sp
+*
+getnull:
+	tst.b	(a0)+
+	bne	getnull
+*
+	move.b	#"\\",-(a0)
+	addq.l	#1,a0
+	move.b	#"*",(a0)+
+	move.b	#".",(a0)+
+	move.b	#"*",(a0)+
+	clr.b	(a0)
+*
+gotpath:
+	clr.w	int_out+0
+	clr.w	int_out+2
+	move.l	#fs_inpat,addr_in
+	move.l	#fs_insel,addr_in+4
+	bsr	fsel_inp
+*
+	move.w	int_out+2,d0	;check exit type
+	cmpi.b	#1,d0		;"ok" on select?
+	bne	docancl
+	rts
+docancl:
+	clr.w	-(sp)
+	trap	#1
+;
+;
+;
+evnt_mul:
+	lea	evntmul(pc),a1
+	bra	doaes
+objc_drw:
+	lea	objcdrw(pc),a1
+	bra	doaes
+form_do:
+	lea	formdo(pc),a1
+	bra	doaes
+form_alr:
+	lea	formalr(pc),a1
+	bra	doaes
+graf_mou:
+	lea	grafmou(pc),a1
+	bra	doaes
+fsel_inp:
+	lea	filesel(pc),a1
+	bra	doaes
+appl_int:
+	lea	apple(pc),a1
+	bra	doaes
+graf_hdl:
+	lea	grhand(pc),a1
+	bra	doaes
+appl_ext:
+	lea	applx(pc),a1
+doaes:
+	lea	control,a0
+	move.w	#4,d0
+appl_lp1:
+	move.w	(a1)+,(a0)+
+	dbra	d0,appl_lp1
+*
+	move.w	#200,d0
+	move.l	#aes_pb,d1
+	trap	#2
+	rts
+;
+; this subroutine loads two ascii hex characters from (a0) and converts them into an int value stored in d0
+; for example, it will load "f","3" and convert it to 0xf3 in d0.
+getbyte:
+	moveq	#0,d0                       ; put 0 in d0
+	move.b	(a0)+,d0                    ; *a0++ -> d0
+	cmpi.b	#"a",d0                     ; this compare subtracts d0 from ascii "a", sets carry flag if borrow happened
+	bcs	.10                             ; branch to .10 if carry flag was set (e.g. d0 was a character < "a")
+	subi.b	#$27,d0                     ; else, sub 0x27 from d0, making d0 equal to #":" (the ascii just after "9")
+.10:
+	subi.b	#"0",d0                     ; now subtract ascii "0" to convert from ascii to int value
+	lsl.w	#4,d0                       ; shift to the left 4 bits
+;
+	move.b	(a0)+,d1                    ; move the next hex ascii to d1
+	cmpi.b	#"a",d1                     ; this compare subtracts d0 from ascii "a", sets carry flag if borrow happened
+	bcs	.20                             ; branch to .20 if carry flag was set (e.g. d0 was a character < "a")
+	subi.b	#$27,d1                     ; else, sub 0x27 from d0, making d0 equal to #":" (the ascii just after "9")
+.20:
+	subi.b	#"0",d1                     ; subtract ascii "0" to convert from ascii to int value
+	or.w	d1,d0                       ; or d1 and d0 and store in d0
+	rts
+;
+;
+;
+;
+;	.byte file created
+;     from: boot1.raw
+;
+;
+boot1:
+	.nlist
+	.dc.b	$80,$00,$20,$4F,$02,$64,$05,$E6,$06,$A9,$08,$8D,$8B,$FD,$4C,$4A
+	.dc.b	$FE,$A0,$06,$20,$00,$03,$A2,$0B,$BD,$6D,$02,$BC,$76,$02,$99,$00
+	.dc.b	$FC,$CA,$D0,$F4,$9C,$91,$FD,$A9,$04,$8D,$95,$FD,$A0,$1F,$B9,$00
+	.dc.b	$80,$99,$A0,$FD,$88,$10,$F7,$8A,$9D,$00,$24,$E8,$D0,$F9,$4C,$49
+	.dc.b	$03,$00,$F2,$02,$00,$80,$67,$07,$02,$59,$02,$C7,$04,$44,$11,$A2
+	.dc.b	$1F,$9E,$A0,$FD,$CA,$10,$FA,$A9,$04,$8D,$8C,$FD,$A9,$0F,$8D,$01
+	.dc.b	$02,$60,$A2,$07,$B9,$41,$02,$95,$35,$88,$CA,$D0,$F7,$60,$01,$20
+	.dc.b	$04,$00,$01,$00,$00,$80,$20,$91,$92,$09,$08,$90,$04,$06,$11,$10
+	.dc.b	$28,$2A,$47,$39,$00,$87,$E4,$E7,$D8,$6A,$9D,$65,$D6,$01,$8F,$B5
+	.dc.b	$79,$98,$67,$BF,$CA,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
+	.dc.b	$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
+	.dc.b	$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
+	.dc.b	$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
+	.dc.b	$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
+	.dc.b	$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
+	.dc.b	$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
+	.dc.b	$20,$62,$02,$E6,$3B,$E6,$3C,$A5,$36,$20,$00,$FE,$A6,$37,$E8,$A4
+	.dc.b	$38,$C8,$20,$42,$03,$38,$A6,$37,$A5,$38,$E9,$02,$A8,$C6,$3B,$D0
+	.dc.b	$04,$C6,$3C,$F0,$19,$AD,$B2,$FC,$92,$39,$E6,$39,$D0,$02,$E6,$3A
+	.dc.b	$E8,$D0,$EA,$C8,$D0,$E7,$E6,$36,$64,$37,$64,$38,$80,$C9,$60,$AD
+	.dc.b	$B2,$FC,$CA,$D0,$FA,$88,$D0,$F7,$60,$A9,$12,$85,$33,$A5,$33,$4A
+	.dc.b	$4A,$E5,$33,$4A,$2E,$82,$02,$2E,$83,$02,$66,$33,$A5,$33,$6D,$82
+	.dc.b	$02,$4D,$83,$02,$A8,$BD,$00,$24,$48,$B9,$00,$24,$9D,$00,$24,$68
+	.dc.b	$99,$00,$24,$E8,$D0,$D7,$CE,$F2,$03,$D0,$D2,$A2,$32,$74,$00,$CA
+	.dc.b	$D0,$FB,$A5,$31,$20,$00,$FE,$AD,$B0,$FC,$F0,$03,$20,$4F,$02,$A9
+	.dc.b	$10,$85,$32,$38,$A2,$10,$AD,$B2,$FC,$6D,$B2,$FC,$95,$20,$CA,$D0
+	.dc.b	$F5,$4E,$F1,$03,$66,$3E,$D0,$2A,$A9,$02,$85,$3D,$8A,$64,$00,$18
+	.dc.b	$A2,$1F,$75,$11,$95,$11,$65,$00,$A8,$B9,$00,$24,$E6,$00,$CA,$10
+	.dc.b	$F1,$C6,$3D,$D0,$EB,$A2,$10,$B5,$00,$55,$10,$95,$00,$95,$10,$CA
+	.dc.b	$D0,$F5,$C6,$32,$D0,$BD,$E6,$31,$D0,$A8,$A2,$0F,$B5,$01,$DD,$85
+	.dc.b	$02,$D0,$FE,$CA,$10,$F6,$20,$4F,$02,$A0,$0D,$20,$00,$03,$6C,$4B
+	.dc.b	$02,$3F,$08,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
+;
+	.list
+;
+;
+;  Last 5 blocks of 1Meg never change, so let's just
+;   copy pre-encrypted
+;
+boot1e:
+	.nlist
+	.dc.b	$FB,$6C,$82,$5C,$19,$13,$F0,$42,$86,$4B,$F7,$27,$21,$28,$F6,$57
+	.dc.b	$D4,$50,$D0,$04,$DB,$D3,$77,$25,$5F,$85,$A4,$BB,$58,$A8,$1D,$D0
+	.dc.b	$81,$76,$9E,$02,$E5,$2F,$78,$7F,$10,$C1,$0A,$BC,$B2,$42,$59,$FC
+	.dc.b	$F9,$F5,$2B,$33,$A8,$41,$4F,$BD,$C1,$76,$22,$A3,$88,$D9,$57,$C9
+	.dc.b	$51,$3A,$26,$BE,$4A,$1A,$7F,$42,$61,$CF,$FC,$FC,$5B,$06,$94,$D2
+	.dc.b	$2C,$78,$45,$BA,$93,$C4,$7D,$7C,$81,$73,$07,$4F,$E2,$6C,$E9,$81
+	.dc.b	$1A,$DE,$77,$74,$87,$DE,$26,$3B,$74,$49,$65,$DA,$8C,$5C,$9B,$AB
+	.dc.b	$74,$4E,$E0,$48,$E1,$A2,$32,$0E,$3E,$4C,$72,$FA,$35,$25,$CE,$3A
+	.dc.b	$58,$92,$1B,$28,$D5,$39,$3D,$4D,$64,$19,$92,$66,$DD,$F9,$A5,$3B
+	.dc.b	$13,$82,$EF,$1B,$5F,$C2,$C6,$8C,$C1,$23,$44,$1D,$1E,$53,$9D,$21
+	.dc.b	$47,$F4,$97,$7B,$FF,$31,$C0,$49,$CD,$E6,$11,$36,$1E,$0E,$3C,$E1
+	.dc.b	$C8,$80,$C1,$6D,$BD,$BA,$1A,$99,$93,$49,$47,$65,$3B,$AD,$7D,$79
+	.dc.b	$A1,$22,$02,$18,$F4,$A4,$48,$F4,$E7,$11,$EA,$0C,$0E,$EB,$72,$B8
+	.dc.b	$BE,$0B,$9E,$48,$02,$63,$74,$1F,$FE,$81,$CD,$A5,$79,$A3,$87,$75
+	.dc.b	$CE,$26,$3B,$41,$1C,$14,$A9,$97,$66,$A7,$FA,$EE,$7D,$FB,$32,$37
+	.dc.b	$C4,$8E,$1D,$D9,$2C,$1B,$CA,$AB,$47,$2A,$97,$3C,$0D,$68,$EC,$06
+	.list
+;
+;
+;	.byte file created
+;     from: boot2.raw
+;
+;
+boot2:
+	.nlist
+	.dc.b	$80,$00,$20,$4F,$02,$64,$05,$E6,$06,$A9,$08,$8D,$8B,$FD,$4C,$4A
+	.dc.b	$FE,$A0,$06,$20,$00,$03,$A2,$0B,$BD,$6D,$02,$BC,$76,$02,$99,$00
+	.dc.b	$FC,$CA,$D0,$F4,$9C,$91,$FD,$A9,$04,$8D,$95,$FD,$A0,$1F,$B9,$00
+	.dc.b	$80,$99,$A0,$FD,$88,$10,$F7,$8A,$9D,$00,$24,$E8,$D0,$F9,$4C,$49
+	.dc.b	$03,$00,$F2,$02,$00,$80,$67,$07,$02,$59,$02,$C7,$04,$44,$11,$A2
+	.dc.b	$1F,$9E,$A0,$FD,$CA,$10,$FA,$A9,$04,$8D,$8C,$FD,$A9,$0F,$8D,$01
+	.dc.b	$02,$60,$A2,$07,$B9,$41,$02,$95,$35,$88,$CA,$D0,$F7,$60,$01,$20
+	.dc.b	$04,$00,$01,$00,$00,$80,$20,$91,$92,$09,$08,$90,$04,$06,$11,$10
+	.dc.b	$28,$2A,$47,$39,$00,$87,$E4,$E7,$D8,$6A,$9D,$65,$D6,$01,$8F,$B5
+	.dc.b	$79,$98,$67,$BF,$CA,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
+	.dc.b	$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
+	.dc.b	$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
+	.dc.b	$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
+	.dc.b	$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
+	.dc.b	$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
+	.dc.b	$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
+	.dc.b	$20,$62,$02,$E6,$3B,$E6,$3C,$A5,$36,$20,$00,$FE,$A6,$37,$E8,$A4
+	.dc.b	$38,$C8,$20,$42,$03,$38,$A6,$37,$A5,$38,$E9,$04,$A8,$C6,$3B,$D0
+	.dc.b	$04,$C6,$3C,$F0,$19,$AD,$B2,$FC,$92,$39,$E6,$39,$D0,$02,$E6,$3A
+	.dc.b	$E8,$D0,$EA,$C8,$D0,$E7,$E6,$36,$64,$37,$64,$38,$80,$C9,$60,$AD
+	.dc.b	$B2,$FC,$CA,$D0,$FA,$88,$D0,$F7,$60,$A9,$12,$85,$33,$A5,$33,$4A
+	.dc.b	$4A,$E5,$33,$4A,$2E,$82,$02,$2E,$83,$02,$66,$33,$A5,$33,$6D,$82
+	.dc.b	$02,$4D,$83,$02,$A8,$BD,$00,$24,$48,$B9,$00,$24,$9D,$00,$24,$68
+	.dc.b	$99,$00,$24,$E8,$D0,$D7,$CE,$F5,$03,$D0,$D2,$A2,$32,$74,$00,$CA
+	.dc.b	$D0,$FB,$A5,$31,$20,$00,$FE,$AD,$B0,$FC,$F0,$03,$20,$4F,$02,$A9
+	.dc.b	$10,$85,$32,$38,$A2,$10,$AD,$B2,$FC,$A0,$03,$6D,$B2,$FC,$88,$D0
+	.dc.b	$FA,$95,$20,$CA,$D0,$F0,$4E,$F4,$03,$D0,$2A,$A9,$02,$85,$3D,$8A
+	.dc.b	$64,$00,$18,$A2,$1F,$75,$11,$95,$11,$65,$00,$A8,$B9,$00,$24,$E6
+	.dc.b	$00,$CA,$10,$F1,$C6,$3D,$D0,$EB,$A2,$10,$B5,$00,$55,$10,$95,$00
+	.dc.b	$95,$10,$CA,$D0,$F5,$C6,$32,$D0,$BA,$E6,$31,$D0,$A5,$A2,$0F,$B5
+	.dc.b	$01,$DD,$85,$02,$D0,$FE,$CA,$10,$F6,$20,$4F,$02,$A0,$0D,$20,$00
+	.dc.b	$03,$6C,$4B,$02,$FF,$08,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00
+;
+	.list
+;
+;
+;  Last 5 blocks of 2Meg never change, so let's just
+;   copy pre-encrypted
+;
+boot2e:
+	.nlist
+	.dc.b	$FB,$6A,$06,$B1,$DB,$A5,$52,$66,$51,$C2,$BD,$FA,$B1,$30,$CB,$21
+	.dc.b	$32,$D6,$A3,$70,$50,$DD,$C5,$EE,$57,$C4,$D7,$3F,$C1,$69,$9E,$90
+	.dc.b	$DF,$C6,$3D,$80,$02,$13,$F6,$56,$11,$EE,$7C,$68,$3A,$DA,$0A,$27
+	.dc.b	$05,$B6,$73,$2E,$A8,$41,$4F,$BD,$C1,$76,$22,$A3,$88,$D9,$57,$C9
+	.dc.b	$51,$3A,$26,$BE,$4A,$1A,$7F,$42,$61,$CF,$FC,$FC,$5B,$06,$94,$D2
+	.dc.b	$2C,$78,$45,$BA,$93,$C4,$7D,$7C,$81,$73,$07,$4F,$E2,$6C,$E9,$81
+	.dc.b	$1A,$DE,$77,$74,$87,$DE,$26,$9E,$7A,$A8,$19,$A7,$34,$32,$70,$ED
+	.dc.b	$59,$A8,$4A,$D8,$FE,$CB,$DD,$02,$2F,$CE,$92,$E9,$13,$A6,$FF,$B4
+	.dc.b	$4B,$18,$9D,$63,$48,$E0,$3B,$3B,$0D,$2B,$FC,$04,$A4,$E3,$5E,$4C
+	.dc.b	$3C,$94,$70,$C4,$F0,$64,$15,$48,$68,$17,$C3,$98,$04,$04,$74,$C0
+	.dc.b	$E0,$06,$46,$A4,$3D,$4A,$3A,$DF,$AA,$0B,$EF,$A9,$84,$04,$48,$4F
+	.dc.b	$06,$DD,$F5,$02,$6B,$5E,$A9,$BB,$6C,$05,$2F,$71,$98,$C4,$AF,$A8
+	.dc.b	$A2,$8B,$47,$69,$C6,$C7,$10,$9A,$2A,$01,$D8,$53,$32,$01,$C9,$EF
+	.dc.b	$23,$1B,$78,$C4,$41,$63,$8A,$CA,$2C,$71,$16,$90,$54,$40,$29,$84
+	.dc.b	$4A,$A7,$33,$DD,$3A,$2B,$0C,$4C,$37,$8C,$6A,$D6,$C5,$6F,$0B,$D1
+	.dc.b	$29,$8C,$92,$C3,$52,$1E,$22,$1B,$E1,$80,$C2,$5D,$0E,$35,$5B,$1B
+	.list
+;
+;
+apple:
+	.dc.w	10,0,1,0,0
+grhand:
+	.dc.w	77,0,5,0,0
+applx:
+	.dc.w	19,0,1,0,0
+filesel:
+	.dc.w	90,0,2,2,0
+grafmou:
+	.dc.w	78,1,1,1,0
+formalr:
+	.dc.w	52,1,1,1,0
+formdo:
+	.dc.w	50,1,1,1,0
+objcdrw:
+	.dc.w	42,6,1,1,0
+evntmul:
+	.dc.w	25,16,7,1,0
+*
+size:
+	.dc.l	0
+handle:
+	.dc.w	0
+;
+;
+;
+aes_pb:
+	.dc.l	control
+	.dc.l	global
+	.dc.l	int_in
+	.dc.l	int_out
+	.dc.l	addr_in
+	.dc.l	addr_out
+*
+*
+input0:
+	.dc.b	$80
+	.dc.b	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	.dc.b	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	.dc.b	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	.dc.b	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+	.dc.b	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+;
+;
+	.even
+;
+	.nlist
+pele:
+	.dc.b	$35,$B5,$A3,$94,$28,$06,$D8,$A2
+	.dc.b	$26,$95,$D7,$71,$B2,$3C,$FD,$56
+	.dc.b	$1C,$4A,$19,$B6,$A3,$B0,$26,$00
+	.dc.b	$36,$5A,$30,$6E,$3C,$4D,$63,$38
+	.dc.b	$1B,$D4,$1C,$13,$64,$89,$36,$4C
+	.dc.b	$F2,$BA,$2A,$58,$F4,$FE,$E1,$FD
+	.dc.b	$AC,$7E,$79
+;
+	.list
+;
+;
+esc	equ	$1b
+*
+;
+*  non word-aligned data here..
+*
+keyname:
+	.dc.b	"A:KEYFILE.1",0		;these should each be 12 chars
+	.dc.b	"A:KEYFILE.2",0
+	.dc.b	"A:KEYFILE.3",0
+msg0:
+	dc.b	esc,"E"		;clear screen & home cursor
+	.rept	1	
+	dc.b	esc,"B"		;down 1 line
+	.endr
+	.rept	5
+	dc.b	esc,"C"		;forward 1 char	
+	.endr
+
+	.dc.b	" Lynx Cart Encrypt",13
+
+	.rept	1	
+	dc.b	esc,"B"		;down 1 line
+	.endr
+	.rept	3
+	dc.b	esc,"C"		;forward 1 char	
+	.endr
+		
+	.dc.b	" Select another .ROM file",13,10
+	.dc.b	"   to encrypt or Cancel to exit",13,10,0
+*
+msg2:
+	.dc.b	13
+	.dc.b	"Input file error on: ",0
+msg3:
+	.dc.b	13
+	.dc.b	".ROM file is not either 128k or 256k",0
+msgx:
+	.dc.b	13,10
+	.dc.b	"Read error on Keydisk, Lynx encrypt aborted..",0
+quitmsg:
+	.dc.b	13,10,10
+	.dc.b	" Hit any key to exit.",0
+;
+badwrmsg:
+	.dc.b	13
+	.dc.b	"File write error on: ",0	
+;
+encrmsg0:
+	dc.b	esc,"E"		;clear screen & home cursor
+	.dc.b	13,10,10
+	.dc.b	"Encrypting ",0
+encrmsg1:
+	.dc.b	13,10,10,0	
+blockmsg:
+	.dc.b	13,10
+	.dc.b	"RSA on block #"
+blknbr:
+	.dc.b	"1......",0
+signon:
+	.dc.b	esc,"E"
+	.dc.b	13,10,10,10
+	.dc.b	"Lynx Cartridge Encryption Code",13,10
+	.dc.b	"Authorized Users Only, Please",13,10,10,10,0
+keymsg:
+	.dc.b	13,10
+	.dc.b	"Place in drive A: (then hit any key) Keydisk #"
+keynbr:
+	.dc.b	"1...",0
+;
+;
+	.bss
+;
+;
+	.ds.b	1024
+stack:
+;
+;
+code6502:
+	.ds.b	512		;here's where we copy bootII code
+;
+;  Stuff for item selector
+;
+fs_inpat:
+	ds.b	70
+fs_insel:
+	ds.b	64		;file selector output selection
+;
+;  AES parameter arrays..
+;
+control:
+	.ds.w	5
+global:
+	.ds.w	3
+	.ds.l	6
+int_in:
+	.ds.w	16
+int_out:
+	.ds.w	7
+addr_in:
+	.ds.l	2
+addr_out:
+	.ds.l	1
+;
+;
+;  Cart Hash stuff
+;
+hash:
+	.ds.b	16
+hashx:
+	.ds.b	16
+hashy:
+	.ds.b	16
+RandPage:
+	.ds.b	256
+;
+;  RSA stuff
+;
+A_num:
+	.ds.b	60
+B_num:
+	.ds.b	60
+C_num:
+	.ds.b	60
+N_num:
+	.ds.b	60
+kahuna:
+	.ds.b	60
+keybuild:
+	.ds.b	1000
+;
+;  Cart Rom Image
+;
+romimg:
+	.ds.b	$40000		;big enough for 256k cart
+
